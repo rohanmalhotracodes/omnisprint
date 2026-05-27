@@ -1,0 +1,23 @@
+name: oppia_team
+version: 0.1.0
+dsl_version: 3
+backend: jsonl
+test_queries:
+  - SELECT * FROM oppia_team.members LIMIT 1
+tables:
+  - name: members
+    description: Contributor directory snapshot (name/email/team/role)
+    source:
+      location: file:///Users/rohanmalhotra/Desktop/Hack/oppia-roadmap-risk-oracle/coral/data/
+      glob: "oppia_team_snapshot.jsonl"
+    columns:
+      - name: name
+        type: Utf8
+      - name: team
+        type: Utf8
+      - name: role
+        type: Utf8
+      - name: github_handle
+        type: Utf8
+      - name: email
+        type: Utf8

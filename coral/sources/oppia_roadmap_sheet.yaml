@@ -1,0 +1,59 @@
+name: oppia_roadmap
+version: 0.1.0
+dsl_version: 3
+backend: jsonl
+test_queries:
+  - SELECT * FROM oppia_roadmap.projects LIMIT 1
+tables:
+  - name: projects
+    description: Oppia roadmap projects (snapshot)
+    source:
+      location: file:///Users/rohanmalhotra/Desktop/Hack/oppia-roadmap-risk-oracle/coral/data/
+      glob: "oppia_roadmap_snapshot.jsonl"
+    columns:
+      - name: project_id
+        type: Utf8
+      - name: project_name
+        type: Utf8
+      - name: project_description
+        type: Utf8
+      - name: project_owner_lead
+        type: Utf8
+      - name: project_owner_contributor
+        type: Utf8
+      - name: planned_completion_date
+        type: Utf8
+      - name: subtask
+        type: Utf8
+      - name: estimated_completion_date
+        type: Utf8
+      - name: status
+        type: Utf8
+      - name: assignee
+        type: Utf8
+      - name: notes
+        type: Utf8
+      - name: github_links
+        type: Utf8
+      - name: debugging_doc_link
+        type: Utf8
+      - name: source_mode
+        type: Utf8
+  - name: project_links
+    description: Flattened project-to-GitHub link rows for cross-source joins
+    source:
+      location: file:///Users/rohanmalhotra/Desktop/Hack/oppia-roadmap-risk-oracle/coral/data/
+      glob: "oppia_roadmap_project_links.jsonl"
+    columns:
+      - name: project_id
+        type: Utf8
+      - name: project_name
+        type: Utf8
+      - name: subtask
+        type: Utf8
+      - name: link_type
+        type: Utf8
+      - name: link_number
+        type: Int64
+      - name: source_mode
+        type: Utf8

@@ -1,0 +1,23 @@
+name: ci
+version: 0.1.0
+dsl_version: 3
+backend: jsonl
+test_queries:
+  - SELECT * FROM ci.signals LIMIT 1
+tables:
+  - name: signals
+    description: CI signals snapshot
+    source:
+      location: file:///Users/rohanmalhotra/Desktop/Hack/oppia-roadmap-risk-oracle/coral/data/
+      glob: "ci_signals.jsonl"
+    columns:
+      - name: pr_number
+        type: Int64
+      - name: ci_status
+        type: Utf8
+      - name: failed_tests
+        type: Int64
+      - name: flaky_tests
+        type: Int64
+      - name: last_run
+        type: Utf8

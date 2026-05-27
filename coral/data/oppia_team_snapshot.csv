@@ -1,0 +1,114 @@
+"Full Name
+
+(Note: If any cells here are coloured orange, it means that columns I-K are incomplete.)",Status,Area of responsibility,Current deliverable (and expected due date),Potential next steps,Motivation,Primary time zone,"Meeting windows (in primary time zone)
+
+Eg: Mon/Wed/Fri 14:00-16:00",Email,Onboarding date,GitHub username,Reviewer training (3 PRs),GFI training (3 issues)
+Kartik Suryavanshi,Lead (Active),"1. Manage's project ownership and team coordination
+2. Contributing to GSoC project 1.3 Re-design the topic page
+3. Contributing to community and onboarding new collaborator ","- Working on Deprecating automatic text-to-speech in exploration settings tab
+
+",- Working on GSoC project.,"Frontend Issues
+
+Wants to develop coding/debugging skills. Prefers learner-facing projects that directly impact Oppia’s educational goals, so he can see how his contributions improve the UX. Prefers Angular/TS projects, but also open to Python ones.
+
+Wants to gain experience for GSoC. Wants to complete Flashbacks project before GSoC",IST (UTC+5:30),Mostly available everyday after 10:00 AM,kartiknileshs@gmail.com,9 Oct 2024,KartikSuryavanshi,"PRs reviewed (mentor: Mohit):
+
+- PR #24837 (1 credit)
+- PR #25279 (1/2 credit)
+
+
+PRs reviewed (mentor: Hardik):
+- PR #25676 (1/2 credit) 
+- PR #25672 (1/2 credit) ",
+Mosin Shaikh,Lead (Active),"1. Manage's project ownership and team coordination
+2. Contributing to GSoC project 1.2. Learner assessment
+3. Contributing to community and onboarding new collaborator "," 
+- Working on Acceptance Test for serial chapter feature part 2
+
+",- Working on GSoC project.,Wants to work on server log related issues. Wants to do more debugging stuff,IST (UTC+5:30),Mostly available everyday after 9:00 PM,"
+work.mosin74@gmail.com",16 Sep 2025,mosin74,,
+Hardik Goyal,Lead (Active),"Memeber: 
+
+1. GSoC mentor - 1.3. Topic page redesign project 
+",Reviewing PRDs and breaking down projects,Work site speed enahncement,"Wants to work on full-stack issues and learn about Data validation
+
+Wants to develop coding/debugging/design skills and leadership skills.",IST (UTC+5:30),,hardikgoyal2003@gmail.com,14 Jan 2024,HardikGoyal2003,"PRs reviewed (mentor: Sean):
+
+- PR #21513 (1/2 credit)
+- PR #22538 (in progress)",
+Yash Bahuguna,Member (Active),"Collaborator: 
+1. working on infrastructure-related issues","In ""send pending review notification"" workflow, old discussions are not being deleted: https://github.com/oppia/oppia/issues/22820 
+
+UnboundLocalError: local variable 'updated_pr_dict' referenced before assignment (Send Pending Reviews Notification  https://github.com/oppia/oppia/issues/22820 ","Hand over project to build from scratch 
+assing one from below 2:
+
+TDD - Remote Configuration of Android Feature Flags & Platform Parameters via Web
+TDD: Web Implementation Of Flashbacks Feature","I want to mainly work on:
+- DevOps
+- Infra issues",IST (UTC+5:30),6-7 PM,yashbahuguna918@gmail.com,9 Dec 2025,yashbhu,,
+Tanmay Goyal,Member (Active),"Collaborator :
+1. Took ownership of the Q2 tracker project - Fix the most occurring flakes","Assign two groups from  https://github.com/oppia/oppia/issues/23496
+",- Working on Fixing the most occurring flakes project,Wants to work on Frontend Issues,IST (UTC+5:30),after 18:00 anytime,"
+tanmaygoyal0712@gmail.com",18 Jan 2026,tanmaygoyal2007,,
+Deepanshu Yadav,Member (Active),"Collaborator: (Having Exam Till 31st May)
+
+1. Took ownership of the Q2 tracker project - Fix the most occurring flakes",- Working Fixing the most occurring flakes project,Assign two groups from  https://github.com/oppia/oppia/issues/23496,"- Wants to fix flakes and CI failures.
+- Likes to work on frontend related issues(Open to backend issues too.)",IST (UTC+5:30),,ydeepu1125@gmail.com,31 Jan 2026,KURO-1125,,
+Brian Rodriguez,Member (Active),"Memeber: 
+
+1. GSoC mentor - 1.2. Learner assessment project 
+2. Firbase Authentication ",- Firebase Authentication Beam Job to sync accounts between Backup/Test Server/Production,"- GSOC preparations & review
+- Busy in job hunting and interview prep ","- Work on top priority issues and offer reviews etc.
+- Want to get a closer look at the students/teachers and how to make things better for them",EST (UTC-4),,"
+thatbrod@gmail.com",2 Feb 2026,brianrodri,,
+Somnath Mishra,Member (Active),"Collaborator:  
+(Will be away till 5 Jun)
+
+1. New lesson Player acceptance
+2. Took ownership of building a new feature from scratch  ",New Lesson Player acceptance test  (Part 1),New Lesson Player acceptance test  (Part 2),"- Work on backend issues (prefers small bugs in frontend)
+
+- Fine with full stack issues.",IST (UTC+5:30),,somnath012003@gmail.com,10 Feb 2026,somnath-mishra,,
+Rohan Malhotra,Member (Active),,"- Fix #10162: Non-currency input invalid error 
+https://github.com/oppia/oppia/pull/25831.            -Fix #18140: make NumericInput exponent support configurable and fix the helper text
+https://github.com/oppia/oppia/pull/25789",Will be working on All blog page issues + RTE issues project with Simran,"- Fronted issue  
+- Learn over time and start with full stack issues. Away till 21st may ",IST (UTC+5:30),,"
+rohanmalhotra430@gmail.com
+",22 Mar 2026,rohanmalhotracodes,,
+Sourav Bera,Member (Active),"Collaborator:
+
+1. Took ownership of Q2 tracker project - Launch Study Guides + all the project board issues","
+- Redirect the 'subtopic' handler to the 'subtopic_with_study_guide_migration' handler in android.py
+https://github.com/oppia/oppia/issues/25518 ",- Deprecate the show_restructured_study_guides feature flag https://github.com/oppia/oppia/issues/25520,"- Frontend and backend issues 
+",IST (UTC+5:30),Thu / Sat / Sun - 17:00-19:00,sbera987654321@gmail.com,22 Mar 2026,sbera01,,
+Simran Kaur,Member (Active),"Collaborator:  
+(Will be away till 12 Jun)","- Fix #18503: Update font family for LaTeX https://github.com/oppia/oppia/pull/25864
+- Fix #18371: Fix schema validation error for decimal answers in NumericInput interactions  https://github.com/oppia/oppia/pull/25972
+-Fix #15455: Make schema-validators context aware https://github.com/oppia/oppia/pull/26029",- Will be working on All blog page issues + RTE issues project with Rohan,"Like to work on issues that are user phasing, frontend issue",IST (UTC+5:30),6:00 - 7:00 PM,simrankaur47937@gmail.com,29 Mar 2026,arkia09,,
+Aditya Lakhotia,Member (Active),Collaborator: (Away till 1st June),- Assign two groups from - https://github.com/oppia/oppia/issues/23496,,- Frontend issues & solving flakes.,IST (UTC+5:30),Fri/Sat/Sun after 20:30 anytime,"
+adityalakhotia21@gmail.com",19 Apr 2026,Aditya22-smart,,
+Meeth Gangwar,Member (Active),"Memeber: 
+
+1. WebPack Removal ",Working on Webpack removal PR: https://github.com/oppia/oppia/pull/26078,Moving to core team after complition of WEBPACK project,"I want to mainly work on:
+- Server errors
+- Backend issues",IST (UTC+5:30),,gangwarmeeth@gmail.com,9 Dec 2025,Meeth-webdev,,
+Arnav Narula,Member (Active),Collaborator:,- Assign two groups from - https://github.com/oppia/oppia/issues/23496 ,,"- Front issues & Acceptance tests issues, flakes",IST (UTC+5:30),6:00 PM-7:00 PM,"
+arnavnarula25@gmail.com",19 Apr 2026,arnav25102004,,
+Mohit Ruwatia,Former Member,"Member: 
+
+1. GSoC mentor - 1.1. Web User Feedback ",N/A,N/A,"Work on something from scratch (fullstack issues)
+
+Wants to develop coding/debugging/design skills and leadership skills.",IST (UTC+5:30),N/A,"
+mohitruwatia2312@gmail.com",27 Jun 2024,mon4our,"PRs reviewed:
+- PR #21555 (mentor: Kevin)
+- PR #22032 (mentor: Sean)
+- PR #22150 (half-credit)
+- PR #22224 (mentor: Sean)",
+Nitish Kumar,Member (Active),"Member: 
+
+1. Frontend Codeowner
+2. Contributing to GSoC project 1.1. Web User Feedback",Working on GSoC project (Web User Feedback),After CBP ends start the coding period,"Wants to do a bit of everything. Wants to do more debugging stuff.
+
+Wants to develop coding/debugging/design skills and leadership skills.
+
+",IST (UTC+5:30),Mostly Available every day 6:30 pm,"
+imnitishkumar04@gmail.com",19 Jan 2026,NITISH084,Already a reviewer,
