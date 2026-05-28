@@ -76,9 +76,48 @@ def _resolve_contributor_email(report: Dict[str, Any]) -> Optional[str]:
 
 
 def _build_mailto(project_name: str, message: str, contributor_email: str) -> str:
-    subject = quote(f"Sprint Tracker follow-up: {project_name}")
+    subject = quote(f"Quick check-in on {project_name}")
     body = quote(message or "")
     return f"mailto:{contributor_email}?subject={subject}&body={body}"
+
+
+def _is_failed_ci_item(row: Dict[str, Any]) -> bool:
+    status = str(row.get("status") or row.get("ci_status") or "").strip().lower()
+    summary = str(row.get("summary") or "").strip().lower()
+    return (
+        status in ("failed", "failure", "error", "timed_out", "cancelled")
+        or "failing test" in summary
+        or "failed test" in summary
+        or "ci failed" in summary
+    )
+
+
+def _ci_failure_lines(report: Dict[str, Any], limit: int = 2) -> List[str]:
+    lines: List[str] = []
+    for row in report.get("ci_evidence") or []:
+        if not isinstance(row, dict) or not _is_failed_ci_item(row):
+            continue
+        pr_number = row.get("pr_number")
+        name = str(row.get("name") or "").strip()
+        summary = str(row.get("summary") or "").strip()
+        url = str(row.get("html_url") or "").strip()
+
+        left = f"PR #{pr_number}" if pr_number else (name or "CI check")
+        details = summary or name or "CI/test failure signal"
+        text = f"{left}: {details}"
+        if url:
+            text = f"{text} ({url})"
+        lines.append(text)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _format_links_block(label: str, links: List[str], limit: int = 4) -> str:
+    if not links:
+        return f"{label}: None"
+    items = [f"- {url}" for url in links[:limit]]
+    return f"{label}:\n" + "\n".join(items)
 
 
 def _needs_reminder(report: Dict[str, Any], risk_threshold: str = "HIGH") -> bool:
@@ -108,28 +147,53 @@ def _message_text(report: Dict[str, Any], issue_links: List[str], pr_links: List
     contributor = report.get("project_owner_contributor") or "Contributor"
     project_name = report.get("project_name") or "this project"
     risk_level = report.get("risk_level") or "HIGH"
-    drivers = (report.get("risk_drivers") or [])[:2]
+    drivers = (report.get("risk_drivers") or [])[:3]
     while len(drivers) < 2:
-        drivers.append("Risk signal detected in roadmap/GitHub evidence")
+        drivers.append("Risk signal detected in planning/GitHub evidence")
 
-    issue_part = ", ".join(issue_links[:6]) if issue_links else "None"
-    pr_part = ", ".join(pr_links[:6]) if pr_links else "None"
+    ci_failure_lines = _ci_failure_lines(report, limit=2)
+    issue_block = _format_links_block("Issues", issue_links, limit=4)
+    pr_block = _format_links_block("PRs", pr_links, limit=4)
 
-    return (
-        f"Hi {contributor}, quick reminder on {project_name}.\n\n"
-        f"Sprint Tracker flagged this project as {risk_level} because:\n"
-        f"- {drivers[0]}\n"
-        f"- {drivers[1]}\n\n"
-        "Could you please share:\n"
-        "1. Current progress\n"
-        "2. Any blockers\n"
-        "3. Updated expected completion date\n"
-        "4. Whether any reviewer/help is needed\n\n"
-        "Linked items:\n"
-        f"- Issues: {issue_part}\n"
-        f"- PRs: {pr_part}\n\n"
-        "Thanks!"
+    asks = [
+        "1. When will you take up the linked issue/PR items?",
+        "2. Any blockers right now?",
+        "3. Updated expected completion date.",
+    ]
+    if ci_failure_lines:
+        asks.append("4. Do you need help resolving the failing tests/CI checks?")
+    else:
+        asks.append("4. Do you need any review/help on these linked items?")
+
+    lines: List[str] = [
+        f"Hi {contributor}, quick follow-up on {project_name}.",
+        "",
+        f"OmniSprint flagged this as {risk_level} because:",
+        f"- {drivers[0]}",
+        f"- {drivers[1]}",
+    ]
+    if len(drivers) > 2:
+        lines.append(f"- {drivers[2]}")
+
+    if ci_failure_lines:
+        lines.extend(["", "CI/test signals:"])
+        for entry in ci_failure_lines:
+            lines.append(f"- {entry}")
+
+    lines.extend(
+        [
+            "",
+            "Linked work:",
+            issue_block,
+            pr_block,
+            "",
+            "Quick update needed:",
+            *asks,
+            "",
+            "Thanks!",
+        ]
     )
+    return "\n".join(lines)
 
 
 def generate_reminders(

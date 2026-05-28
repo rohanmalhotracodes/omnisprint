@@ -1,0 +1,19 @@
+{
+  "name": "omnisprint",
+  "short_name": "omnisprint",
+  "icons": [
+    {
+      "src": "/brand/omnisprint_icon_192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/omnisprint_icon_512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#1f6feb",
+  "background_color": "#f5f7fb",
+  "display": "standalone"
+}

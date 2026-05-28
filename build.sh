@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-echo "Building Sprint Tracker in $ROOT_DIR"
+echo "Building OmniSprint in $ROOT_DIR"
 
 if ! command -v coral >/dev/null 2>&1; then
   echo "Coral CLI not found. Install with: brew install withcoral/coral/coral" >&2

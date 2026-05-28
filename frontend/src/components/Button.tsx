@@ -35,7 +35,7 @@ export default function Button({
       onClick={onClick}
       disabled={isDisabled}
       title={title}
-      className={`btn btn-${variant} btn-${size}${loading ? ' is-loading' : ''}${className ? ` ${className}` : ''}`}
+      className={`btn btn-${variant} btn-${size}${className ? ` ${className}` : ''}`}
       {...rest}
     >
       {loading && <span className="btn-spinner" aria-hidden="true" />}

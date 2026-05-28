@@ -87,6 +87,34 @@ def _collect_high_risk_subtasks(subtasks: List[Subtask]) -> List[Dict[str, Any]]
     return out
 
 
+def _subtask_key(st: Any) -> str:
+    if isinstance(st, dict):
+        subtask = st.get("subtask")
+        status = st.get("status")
+        assignee = st.get("assignee")
+        estimated = st.get("estimated_completion_date")
+        notes = st.get("notes")
+    else:
+        subtask = getattr(st, "subtask", None)
+        status = getattr(st, "status", None)
+        assignee = getattr(st, "assignee", None)
+        estimated = getattr(st, "estimated_completion_date", None)
+        notes = getattr(st, "notes", None)
+    return "|".join(
+        [
+            str(subtask or ""),
+            str(status or ""),
+            str(assignee or ""),
+            str(estimated or ""),
+            str(notes or ""),
+        ]
+    )
+
+
+def _is_failed_ci_signal(status: str, failed_tests: int) -> bool:
+    return status in ("failed", "failure", "error", "timed_out", "cancelled") or failed_tests > 0
+
+
 def score_project(project: Project, extra_context: Dict[str, Any] = None) -> RiskReport:
     score = 0
     drivers: List[str] = []
@@ -159,8 +187,6 @@ def score_project(project: Project, extra_context: Dict[str, Any] = None) -> Ris
             dt = _parse_dt(updated)
             if dt is not None and (datetime.utcnow() - dt).days > 14:
                 stale_open_issue_count += 1
-    if not github_issue_evidence:
-        open_issue_count = linked_issue_count
 
     open_pr_count = 0
     stale_open_pr_count = 0
@@ -172,8 +198,6 @@ def score_project(project: Project, extra_context: Dict[str, Any] = None) -> Ris
             dt = _parse_dt(updated)
             if dt is not None and (datetime.utcnow() - dt).days > 14:
                 stale_open_pr_count += 1
-    if not github_pr_evidence:
-        open_pr_count = linked_pr_count
 
     if open_issue_count:
         score += min(14, open_issue_count * 2)
@@ -195,6 +219,7 @@ def score_project(project: Project, extra_context: Dict[str, Any] = None) -> Ris
     failed_tests_total = 0
     flaky_tests_total = 0
     stale_ci_signal_count = 0
+    failing_ci_pr_numbers = set()
 
     for pr in github_pr_evidence:
         pr_num = _to_int(pr.get("number") or pr.get("id"))
@@ -215,8 +240,9 @@ def score_project(project: Project, extra_context: Dict[str, Any] = None) -> Ris
         failed_tests_total += failed_tests
         flaky_tests_total += flaky_tests
 
-        if status in ("failed", "failure", "error", "timed_out", "cancelled") or failed_tests > 0:
+        if _is_failed_ci_signal(status, failed_tests):
             failing_ci_pr_count += 1
+            failing_ci_pr_numbers.add(pr_num)
         if "flake" in status or flaky_tests > 0:
             flaky_ci_pr_count += 1
 
@@ -236,6 +262,97 @@ def score_project(project: Project, extra_context: Dict[str, Any] = None) -> Ris
     if stale_ci_signal_count:
         score += min(8, stale_ci_signal_count * 2)
         drivers.append(f"{stale_ci_signal_count} linked PR CI signals are stale (>7 days)")
+
+    issue_pr_links = list(extra_context.get("issue_pr_links") or []) if extra_context else []
+    issue_to_related_prs: Dict[int, set[int]] = {}
+    for link in issue_pr_links:
+        issue_num = _to_int(link.get("issue_number"))
+        if issue_num <= 0:
+            continue
+        related_nums = {
+            _to_int(n)
+            for n in (link.get("related_pr_numbers") or [])
+            if _to_int(n) > 0
+        }
+        primary_pr_num = _to_int(link.get("primary_pr_number"))
+        if primary_pr_num > 0:
+            related_nums.add(primary_pr_num)
+        if related_nums:
+            issue_to_related_prs[issue_num] = related_nums
+
+    subtasks_with_failing_linked_ci = 0
+    linked_issue_pr_failures: List[Dict[str, Any]] = []
+    for st in subtasks:
+        issue_nums = {
+            _to_int(n)
+            for n in (st.github_issue_numbers or [])
+            if _to_int(n) > 0
+        }
+        direct_pr_nums = {
+            _to_int(n)
+            for n in (st.github_pr_numbers or [])
+            if _to_int(n) > 0
+        }
+        derived_pr_nums = set(direct_pr_nums)
+        for issue_num in issue_nums:
+            derived_pr_nums.update(issue_to_related_prs.get(issue_num, set()))
+        if not derived_pr_nums:
+            continue
+        failing_related_prs = sorted(derived_pr_nums.intersection(failing_ci_pr_numbers))
+        if not failing_related_prs:
+            continue
+        subtasks_with_failing_linked_ci += 1
+        linked_issue_pr_failures.append(
+            {
+                "subtask": st.subtask,
+                "status": st.status,
+                "assignee": st.assignee,
+                "issue_numbers": sorted(issue_nums),
+                "linked_pr_numbers": sorted(derived_pr_nums),
+                "failing_pr_numbers": failing_related_prs,
+            }
+        )
+
+    if subtasks_with_failing_linked_ci:
+        score += min(16, 6 + 3 * (subtasks_with_failing_linked_ci - 1))
+        drivers.append(
+            f"{subtasks_with_failing_linked_ci} subtasks are linked to issues/PRs with failing CI/tests"
+        )
+        evidence["issue_pr_ci_links"] = linked_issue_pr_failures
+
+        risk_subtask_by_key = {_subtask_key(st): st for st in high_risk_subtasks}
+        for st in subtasks:
+            issue_nums = {
+                _to_int(n)
+                for n in (st.github_issue_numbers or [])
+                if _to_int(n) > 0
+            }
+            direct_pr_nums = {
+                _to_int(n)
+                for n in (st.github_pr_numbers or [])
+                if _to_int(n) > 0
+            }
+            derived_pr_nums = set(direct_pr_nums)
+            for issue_num in issue_nums:
+                derived_pr_nums.update(issue_to_related_prs.get(issue_num, set()))
+            failing_related_prs = sorted(derived_pr_nums.intersection(failing_ci_pr_numbers))
+            if not failing_related_prs:
+                continue
+            key = _subtask_key(st)
+            if key not in risk_subtask_by_key:
+                risk_subtask_by_key[key] = {
+                    "subtask": st.subtask,
+                    "status": st.status,
+                    "assignee": st.assignee,
+                    "estimated_completion_date": st.estimated_completion_date,
+                    "notes": st.notes,
+                    "reasons": [],
+                }
+            reasons = risk_subtask_by_key[key].get("reasons") or []
+            if "linked_pr_ci_failed" not in reasons:
+                reasons.append("linked_pr_ci_failed")
+            risk_subtask_by_key[key]["reasons"] = reasons
+        high_risk_subtasks = list(risk_subtask_by_key.values())
 
     contributor_high_risk_projects = int(extra_context.get("contributor_high_risk_projects", 0)) if extra_context else 0
     if contributor_high_risk_projects >= 2:
@@ -258,6 +375,8 @@ def score_project(project: Project, extra_context: Dict[str, Any] = None) -> Ris
         recs.append("Unblock blocked subtasks first and assign clear owners for each blocker")
     if failing_ci_pr_count:
         recs.append("Fix failing CI checks and reduce failing tests on linked pull requests")
+    if subtasks_with_failing_linked_ci:
+        recs.append("Prioritize issue-to-PR chains with failing CI/tests for contributor follow-up")
     if stale_open_pr_count:
         recs.append("Escalate stale open PRs for review and merge decision")
     if stale_open_issue_count:
@@ -272,8 +391,6 @@ def score_project(project: Project, extra_context: Dict[str, Any] = None) -> Ris
     evidence["github_issues"] = github_issue_evidence
     evidence["github_prs"] = github_pr_evidence
     evidence["ci_signals"] = ci_evidence
-
-    issue_pr_links = list(extra_context.get("issue_pr_links") or []) if extra_context else []
 
     return RiskReport(
         project_id=project.project_id,

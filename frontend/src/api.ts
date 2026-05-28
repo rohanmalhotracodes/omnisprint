@@ -106,6 +106,43 @@ export type ProjectSubtask = {
   notes?: string
   github_issue_numbers?: number[]
   github_pr_numbers?: number[]
+  derived_related_pr_numbers?: number[]
+}
+
+export type GithubIssueEvidence = {
+  number: number
+  title?: string
+  state?: string
+  labels?: any
+  updated_at?: string
+  html_url?: string
+}
+
+export type GithubPrEvidence = {
+  number: number
+  title?: string
+  state?: string
+  draft?: boolean | null
+  updated_at?: string
+  html_url?: string
+}
+
+export type CiEvidence = {
+  source: string
+  status: string
+  name: string
+  summary?: string
+  html_url?: string | null
+  updated_at?: string
+  pr_number?: number | null
+}
+
+export type IssuePrLink = {
+  issue_number: number
+  related_pr_numbers?: number[]
+  link_sources?: Record<string, string[]>
+  primary_pr_number?: number | null
+  primary_link_basis?: string
 }
 
 export type ProjectReport = {
@@ -132,12 +169,15 @@ export type ProjectReport = {
   all_github_pr_numbers?: number[]
   risk_score: number
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  risk_summary?: string
   risk_drivers: string[]
   recommendations: string[]
   high_risk_subtasks: Array<Record<string, any>>
   subtasks: ProjectSubtask[]
-  github_issue_evidence: Array<Record<string, any>>
-  github_pr_evidence: Array<Record<string, any>>
+  issue_pr_links?: IssuePrLink[]
+  github_issue_evidence: GithubIssueEvidence[]
+  github_pr_evidence: GithubPrEvidence[]
+  ci_evidence?: CiEvidence[]
   evidence_by_source: Record<string, any>
   coral_query_flow_used?: { steps?: string[]; queries?: string[] }
 }
@@ -186,26 +226,66 @@ export type RemindersResponse = {
   reminders: Reminder[]
 }
 
-export type SyncStatusResponse = {
+export type AgentToolCall = {
+  name: string
+  arguments?: Record<string, any>
   status?: string
-  last_synced_at?: string
-  [key: string]: any
+  summary?: string
+  coral_sources_used?: string[]
+}
+
+export type AgentAskResponse = {
+  answer: string
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH'
+  tool_calls: AgentToolCall[]
+  evidence_summary: string
+  recommended_actions: string[]
+  reminder: Record<string, any> | null
+  email_draft: Record<string, any> | null
+  used_gemini: boolean
+  fallback_used: boolean
+  fallback_reason?: string
+  gemini_model?: string
+}
+
+export type LatestActivityResponse = {
+  status: string
+  summary: string
+  coral_sources_used: string[]
+  data: {
+    latest_pull_requests?: Array<Record<string, any>>
+    latest_issues?: Array<Record<string, any>>
+    latest_commits?: Array<Record<string, any>>
+    pulls_status?: string
+    issues_status?: string
+    commits_status?: string
+    pulls_summary?: string
+    issues_summary?: string
+    commits_summary?: string
+    pulls_fallback_used?: boolean
+    issues_fallback_used?: boolean
+    pulls_data_origin?: string
+    issues_data_origin?: string
+    latest_pr_brief?: string
+    high_risk_projects?: Array<Record<string, any>>
+    recommended_actions?: string[]
+  }
 }
 
 export async function fetchHealth() {
-  return request<HealthResponse>('/api/health')
+  return request<HealthResponse>('/api/health', { timeoutMs: 12000 })
 }
 
 export async function fetchProjects() {
-  return request<ProjectReport[]>('/api/projects')
+  return request<ProjectReport[]>('/api/projects', { timeoutMs: 35000 })
 }
 
 export async function fetchOwners() {
-  return request<OwnersResponse>('/api/owners')
+  return request<OwnersResponse>('/api/owners', { timeoutMs: 40000 })
 }
 
 export async function fetchHighRiskReminders() {
-  return request<RemindersResponse>('/api/reminders/high-risk')
+  return request<RemindersResponse>('/api/reminders/high-risk', { timeoutMs: 20000 })
 }
 
 export async function generateReminders(payload: {
@@ -221,15 +301,18 @@ export async function generateReminders(payload: {
 }
 
 export async function agentQuery(question: string) {
-  return request<any>('/api/agent-query', {
+  return request<AgentAskResponse>('/api/agent/ask', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ question }),
+    timeoutMs: 120000,
   })
 }
 
-export async function fetchSyncStatus() {
-  return optionalRequest<SyncStatusResponse>('/api/sync-status')
+export async function fetchLatestActivity(limit = 8) {
+  return request<LatestActivityResponse>(`/api/activity/latest?limit=${encodeURIComponent(String(limit))}`, {
+    timeoutMs: 45000,
+  })
 }
 
 export async function syncRoadmap() {

@@ -11,7 +11,7 @@ class CoralClient:
     def available(self) -> bool:
         return self.path is not None
 
-    def run_sql(self, sql: str, timeout: int = 30) -> List[Dict[str, Any]]:
+    def run_sql(self, sql: str, timeout: int = 12) -> List[Dict[str, Any]]:
         """Run a Coral SQL query and return JSON rows."""
         if not self.available():
             raise RuntimeError("Coral CLI not available")

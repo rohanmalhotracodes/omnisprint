@@ -3,6 +3,7 @@ import re
 import json
 import hashlib
 import subprocess
+from time import monotonic
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,18 +11,44 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from .coral_client import CoralClient
 from .normalizer import group_roadmap_rows
 from .reminder_generator import generate_reminders
 from .risk_engine import score_project
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            value = value.strip()
+            if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            os.environ[key] = value
+    except Exception:
+        # Best-effort .env loading; explicit environment variables still win.
+        return
+
+
+_load_env_file(ROOT_DIR / ".env")
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 coral = CoralClient()
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
 SNAPSHOT_SCRIPT = ROOT_DIR / "scripts" / "snapshot_google_sheets.sh"
 
 SYNC_STATUS: Dict[str, Any] = {
@@ -47,8 +74,18 @@ REPORT_CACHE_SNAPSHOT_FILES = [
     ROOT_DIR / "coral" / "data" / "oppia_team_snapshot.jsonl",
     ROOT_DIR / "coral" / "data" / "ci_signals.jsonl",
 ]
+TABLE_EXISTS_CACHE: Dict[str, Tuple[float, bool]] = {}
+TABLE_EXISTS_CACHE_TTL_SECONDS = int(os.getenv("TABLE_EXISTS_CACHE_TTL_SECONDS", "20"))
 
-_ISSUE_REF_RE = re.compile(r"(?:issues/|#)(\d+)", re.IGNORECASE)
+_PR_CLOSING_ISSUE_REF_RE = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*(?:(?P<repo>[a-z0-9_.-]+/[a-z0-9_.-]+))?#(?P<num>\d+)\b",
+    re.IGNORECASE,
+)
+PROJECT_BUILD_TIMEOUT_SECONDS = int(os.getenv("PROJECT_BUILD_TIMEOUT_SECONDS", "30"))
+
+
+class AgentAskRequest(BaseModel):
+    question: str
 
 
 def _clean(val: Any) -> str:
@@ -88,6 +125,15 @@ def _parse_dt(s: Any):
 
 def _utc_now() -> datetime:
     return datetime.utcnow()
+
+
+def _enforce_build_deadline(start_ts: float, stage: str) -> None:
+    elapsed = monotonic() - start_ts
+    if elapsed > PROJECT_BUILD_TIMEOUT_SECONDS:
+        raise RuntimeError(
+            f"Project report generation timed out after {elapsed:.1f}s during {stage}. "
+            "Coral/source retrieval is too slow right now."
+        )
 
 
 def _dt_to_cache_str(dt: datetime) -> str:
@@ -234,7 +280,15 @@ def _load_env_file(env_file: Path) -> Dict[str, str]:
             continue
         key, val = line.split("=", 1)
         key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
         val = val.strip()
+        # Strip wrapping quotes for simple KEY="value" or KEY='value' entries.
+        if len(val) >= 2 and ((val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'")):
+            val = val[1:-1]
+        # Strip inline comments for unquoted values: KEY=value # comment
+        if " #" in val:
+            val = val.split(" #", 1)[0].rstrip()
         if key:
             out[key] = val
     return out
@@ -243,7 +297,10 @@ def _load_env_file(env_file: Path) -> Dict[str, str]:
 def _load_env_defaults_from_file() -> None:
     file_env = _load_env_file(ROOT_DIR / ".env")
     for key, val in file_env.items():
-        if key and key not in os.environ:
+        existing = str(os.environ.get(key, "")).strip() if key else ""
+        # Prefer process env when explicitly set, but allow .env to override
+        # unset/blank values.
+        if key and (key not in os.environ or not existing):
             os.environ[key] = val
 
 
@@ -251,13 +308,20 @@ _load_env_defaults_from_file()
 
 
 def _table_exists(schema: str, table: Optional[str] = None) -> bool:
+    cache_key = f"{schema}.{table or '*'}"
+    now = monotonic()
+    cached = TABLE_EXISTS_CACHE.get(cache_key)
+    if cached and cached[0] > now:
+        return cached[1]
+
     try:
         if table:
             q = f"SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = '{schema}' AND table_name = '{table}' LIMIT 1;"
         else:
             q = f"SELECT table_schema FROM information_schema.tables WHERE table_schema = '{schema}' LIMIT 1;"
-        rows = coral.run_sql(q)
+        rows = coral.run_sql(q, timeout=8)
         if not rows:
+            TABLE_EXISTS_CACHE[cache_key] = (now + TABLE_EXISTS_CACHE_TTL_SECONDS, False)
             return False
         joined = " ".join(
             [
@@ -266,11 +330,15 @@ def _table_exists(schema: str, table: Optional[str] = None) -> bool:
             ]
         ).lower()
         if schema.lower() not in joined:
+            TABLE_EXISTS_CACHE[cache_key] = (now + TABLE_EXISTS_CACHE_TTL_SECONDS, False)
             return False
         if table and table.lower() not in joined:
+            TABLE_EXISTS_CACHE[cache_key] = (now + TABLE_EXISTS_CACHE_TTL_SECONDS, False)
             return False
+        TABLE_EXISTS_CACHE[cache_key] = (now + TABLE_EXISTS_CACHE_TTL_SECONDS, True)
         return True
     except Exception:
+        TABLE_EXISTS_CACHE[cache_key] = (now + TABLE_EXISTS_CACHE_TTL_SECONDS, False)
         return False
 
 
@@ -278,7 +346,7 @@ def _fetch_roadmap_rows(limit: int = 1000) -> List[Dict[str, Any]]:
     if not coral.available():
         raise RuntimeError("Coral CLI not available")
     q = f"SELECT * FROM oppia_roadmap.projects LIMIT {int(limit)};"
-    rows = coral.run_sql(q)
+    rows = coral.run_sql(q, timeout=12)
     if not isinstance(rows, list):
         raise RuntimeError("Coral roadmap query did not return row list")
     return rows
@@ -294,6 +362,21 @@ def _run_sql_variants(variants: List[str], timeout: int = 8) -> Tuple[List[Dict[
             return [], q
         except Exception as e:
             last_error = e
+            # Fail fast for transport/runtime failures; retrying alternate SQL shapes
+            # does not help and can stall API responses.
+            msg = str(e).lower()
+            if (
+                "timed out" in msg
+                or "operation not permitted" in msg
+                or "permission denied" in msg
+                or "connection" in msg
+                or "network" in msg
+                or "unauthorized" in msg
+                or "forbidden" in msg
+                or "token" in msg
+                or "rate limit" in msg
+            ):
+                raise
             continue
     if last_error is not None:
         raise last_error
@@ -354,7 +437,7 @@ def _fetch_live_github_maps(
                 f"{issue_link_filter};",
             ]
             try:
-                issue_rows, used_q = _run_sql_variants(issue_join_variants, timeout=8)
+                issue_rows, used_q = _run_sql_variants(issue_join_variants, timeout=4)
                 if used_q:
                     queries.append(used_q)
                 if issue_rows:
@@ -382,7 +465,7 @@ def _fetch_live_github_maps(
                 f"{pr_link_filter};",
             ]
             try:
-                pr_rows, used_q = _run_sql_variants(pr_join_variants, timeout=6)
+                pr_rows, used_q = _run_sql_variants(pr_join_variants, timeout=4)
                 if used_q:
                     queries.append(used_q)
                 if pr_rows:
@@ -405,7 +488,7 @@ def _fetch_live_github_maps(
                 f"FROM github.issues WHERE {prefix_clause} number IN ({in_clause});",
             ]
             try:
-                issue_rows, used_q = _run_sql_variants(issue_variants, timeout=8)
+                issue_rows, used_q = _run_sql_variants(issue_variants, timeout=4)
                 if used_q:
                     queries.append(used_q)
                 for r in issue_rows or []:
@@ -424,7 +507,7 @@ def _fetch_live_github_maps(
                 f"FROM github.pulls WHERE {prefix_clause} number IN ({in_clause});",
             ]
             try:
-                pr_rows, used_q = _run_sql_variants(pr_variants, timeout=5)
+                pr_rows, used_q = _run_sql_variants(pr_variants, timeout=4)
                 if used_q:
                     queries.append(used_q)
                 for r in pr_rows or []:
@@ -534,9 +617,7 @@ def _fetch_contributor_email_map() -> Tuple[Dict[str, str], List[str]]:
             )
             names = _split_people(raw_name)
             if not names:
-                local = email.split("@")[0]
-                fallback_name = local.replace(".", " ").replace("_", " ")
-                names = [fallback_name]
+                continue
 
             for name in names:
                 norm = _normalize_person(name)
@@ -558,27 +639,132 @@ def _repo_slug() -> str:
     return f"{owner}/{repo}"
 
 
-def _fallback_issue_row(number: int) -> Dict[str, Any]:
-    slug = _repo_slug()
+def _issue_url(number: int) -> str:
+    return f"https://github.com/{_repo_slug()}/issues/{int(number)}"
+
+
+def _pr_url(number: int) -> str:
+    return f"https://github.com/{_repo_slug()}/pull/{int(number)}"
+
+
+def _normalize_issue_evidence_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    num = _to_int(row.get("number") or row.get("link_number") or row.get("issue_number") or row.get("id"))
+    if num <= 0:
+        return None
     return {
-        "number": int(number),
-        "state": "unknown",
-        "title": f"Issue #{int(number)}",
-        "html_url": f"https://github.com/{slug}/issues/{int(number)}",
-        "source": "link_only",
+        "number": num,
+        "title": _clean(row.get("title")),
+        "state": (_clean(row.get("state")) or "unknown").lower(),
+        "labels": row.get("labels"),
+        "updated_at": _clean(row.get("updated_at") or row.get("updated")),
+        "html_url": _clean(row.get("html_url")) or _issue_url(num),
     }
 
 
-def _fallback_pr_row(number: int) -> Dict[str, Any]:
-    slug = _repo_slug()
+def _normalize_pr_evidence_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    num = _to_int(row.get("number") or row.get("link_number") or row.get("id"))
+    if num <= 0:
+        return None
     return {
-        "number": int(number),
-        "state": "unknown",
-        "title": f"PR #{int(number)}",
-        "html_url": f"https://github.com/{slug}/pull/{int(number)}",
-        "source": "link_only",
+        "number": num,
+        "title": _clean(row.get("title")),
+        "state": (_clean(row.get("state")) or "unknown").lower(),
+        "draft": bool(row.get("draft")) if row.get("draft") is not None else None,
+        "updated_at": _clean(row.get("updated_at") or row.get("updated")),
+        "html_url": _clean(row.get("html_url")) or _pr_url(num),
     }
 
+
+def _build_risk_summary(
+    risk_level: str,
+    risk_drivers: List[str],
+    blocked_subtasks: int,
+    open_issues: int,
+    open_prs: int,
+    stale_prs: int,
+    failing_ci_prs: int,
+) -> str:
+    level = (risk_level or "LOW").upper()
+    reasons: List[str] = []
+    if blocked_subtasks > 0:
+        reasons.append(f"{blocked_subtasks} subtasks are blocked")
+    if open_issues > 0:
+        reasons.append(f"{open_issues} linked issues are open")
+    if open_prs > 0:
+        reasons.append(f"{open_prs} linked pull requests are open")
+    if stale_prs > 0:
+        reasons.append(f"{stale_prs} linked pull requests are stale")
+    if failing_ci_prs > 0:
+        reasons.append(f"{failing_ci_prs} linked pull requests have failing CI checks")
+
+    if not reasons:
+        for driver in risk_drivers[:3]:
+            cleaned = _clean(driver)
+            if cleaned:
+                reasons.append(cleaned)
+
+    if not reasons:
+        return "Project appears on track based on current planning and engineering evidence."
+
+    intro = "needs attention" if level in ("HIGH", "CRITICAL") else "is being monitored"
+    return f"This project {intro} because " + ", ".join(reasons[:3]) + "."
+
+
+def _normalize_ci_evidence_rows(
+    ci_rows: List[Dict[str, Any]],
+    pr_url_by_number: Dict[int, str],
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for row in ci_rows or []:
+        pr_number = _to_int(row.get("pr_number") or row.get("number"))
+        status_raw = _clean(row.get("ci_status") or row.get("status")).lower()
+        failed_tests = _to_int(row.get("failed_tests"))
+        flaky_tests = _to_int(row.get("flaky_tests"))
+
+        if status_raw in ("failed", "failure", "error", "timed_out", "cancelled") or failed_tests > 0:
+            status = "failed"
+        elif status_raw in ("success", "passed", "pass"):
+            status = "passed"
+        elif status_raw in ("in_progress", "pending", "queued"):
+            status = "pending"
+        elif status_raw:
+            status = status_raw
+        else:
+            status = "unknown"
+
+        summary_bits: List[str] = []
+        if failed_tests > 0:
+            summary_bits.append(f"{failed_tests} failing tests")
+        if flaky_tests > 0:
+            summary_bits.append(f"{flaky_tests} flaky tests")
+        if status not in ("passed", "unknown", "pending"):
+            summary_bits.append(f"status: {status}")
+
+        run_id = _to_int(row.get("run_id") or row.get("workflow_run_id"))
+        html_url = _clean(row.get("html_url") or row.get("log_url") or row.get("run_url"))
+        if not html_url and run_id > 0:
+            html_url = f"https://github.com/{_repo_slug()}/actions/runs/{run_id}"
+        if not html_url and pr_number > 0:
+            html_url = pr_url_by_number.get(pr_number, "")
+
+        out.append(
+            {
+                "source": "github_actions",
+                "status": status,
+                "name": _clean(
+                    row.get("name")
+                    or row.get("workflow_name")
+                    or row.get("workflow")
+                    or row.get("job_name")
+                )
+                or f"PR #{pr_number} CI signal",
+                "summary": ", ".join(summary_bits) if summary_bits else "No failure details provided by source.",
+                "html_url": html_url or None,
+                "updated_at": _clean(row.get("updated_at") or row.get("last_run") or row.get("updated")),
+                "pr_number": pr_number if pr_number > 0 else None,
+            }
+        )
+    return out
 
 def _derive_project_status(subtasks: List[Dict[str, Any]]) -> str:
     if not subtasks:
@@ -657,13 +843,20 @@ def _resolve_project_contributor(project_contributor: Optional[str], subtasks: L
     return resolved, resolution
 
 
-def _extract_issue_refs(*texts: Any) -> List[int]:
-    nums: List[int] = []
+def _extract_issue_refs_from_pr_closing_text(*texts: Any) -> List[int]:
+    nums: set[int] = set()
+    repo = _repo_slug().lower()
     for text in texts:
         if text is None:
             continue
-        nums.extend([_to_int(x) for x in _ISSUE_REF_RE.findall(str(text))])
-    return sorted({n for n in nums if n > 0})
+        for m in _PR_CLOSING_ISSUE_REF_RE.finditer(str(text)):
+            ref_repo = _clean(m.group("repo")).lower()
+            if ref_repo and ref_repo != repo:
+                continue
+            num = _to_int(m.group("num"))
+            if num > 0:
+                nums.add(num)
+    return sorted(nums)
 
 
 def _build_issue_pr_subtask_links(
@@ -688,9 +881,9 @@ def _build_issue_pr_subtask_links(
                 issue_to_pr[issue_num].add(pr_num)
                 source_map[issue_num][pr_num].add("same_subtask")
 
-    # Parse PR text references to issue numbers and map them.
+    # Parse PR closing-keyword references (for example, "Fixes #123") and map them.
     for pr_num, pr in pr_map.items():
-        refs = _extract_issue_refs(pr.get("title"), pr.get("body"), pr.get("html_url"))
+        refs = _extract_issue_refs_from_pr_closing_text(pr.get("title"), pr.get("body"))
         for issue_num in refs:
             if issue_num in issue_set:
                 issue_to_pr[issue_num].add(pr_num)
@@ -721,13 +914,24 @@ def _build_issue_pr_subtask_links(
         link_sources = {}
         for pr_num in related_prs:
             link_sources[pr_num] = sorted(source_map[issue_num].get(pr_num, set()))
+        primary_pr_num = None
+        for pr_num in related_prs:
+            if "same_subtask" in source_map[issue_num].get(pr_num, set()):
+                primary_pr_num = pr_num
+                break
+        if primary_pr_num is None:
+            primary_pr_num = related_prs[0]
+        primary_link_basis = "same_subtask" if "same_subtask" in source_map[issue_num].get(primary_pr_num, set()) else "pr_text_reference"
         issue_pr_links.append(
             {
                 "issue_number": issue_num,
                 "related_pr_numbers": related_prs,
                 "link_sources": link_sources,
+                "primary_pr_number": primary_pr_num,
+                "primary_link_basis": primary_link_basis,
                 "issue_evidence": issue_map.get(issue_num),
                 "pr_evidence": [pr_map[p] for p in related_prs if p in pr_map],
+                "primary_pr_evidence": pr_map.get(primary_pr_num),
             }
         )
 
@@ -735,6 +939,7 @@ def _build_issue_pr_subtask_links(
 
 
 def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    build_started = monotonic()
     source_state = _build_source_state()
     source_fingerprint = _source_fingerprint(source_state)
 
@@ -747,6 +952,7 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
             return _hydrate_memory_cache_from_disk(payload)
 
     rows = _fetch_roadmap_rows(limit)
+    _enforce_build_deadline(build_started, "roadmap query")
     projects = group_roadmap_rows(rows)
 
     if not projects:
@@ -782,18 +988,21 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
         coral_queries.extend(github_queries)
     except Exception:
         issues_map, prs_map = {}, {}
+    _enforce_build_deadline(build_started, "github evidence queries")
 
     try:
         ci_signals_map, ci_queries = _fetch_ci_signals_map(all_pr_nums)
         coral_queries.extend(ci_queries)
     except Exception:
         ci_signals_map = {}
+    _enforce_build_deadline(build_started, "ci signal queries")
 
     try:
         contributor_email_map, contributor_queries = _fetch_contributor_email_map()
         coral_queries.extend(contributor_queries)
     except Exception:
         contributor_email_map = {}
+    _enforce_build_deadline(build_started, "contributor directory queries")
 
     pre_reports: List[Tuple[Any, Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]] = []
     for p in projects:
@@ -805,14 +1014,38 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
             num = _to_int(n)
             if num <= 0:
                 continue
-            project_issue_map[num] = issues_map.get(num) or _fallback_issue_row(num)
+            issue_row = issues_map.get(num)
+            if issue_row:
+                project_issue_map[num] = issue_row
+        for n in (p.all_github_issue_numbers or []):
+            num = _to_int(n)
+            if num <= 0 or num in project_issue_map:
+                continue
+            project_issue_map[num] = {
+                "number": num,
+                "title": f"Issue #{num}",
+                "state": "unknown",
+                "html_url": _issue_url(num),
+            }
 
         project_pr_map: Dict[int, Dict[str, Any]] = {}
         for n in (p.all_github_pr_numbers or []):
             num = _to_int(n)
             if num <= 0:
                 continue
-            project_pr_map[num] = prs_map.get(num) or _fallback_pr_row(num)
+            pr_row = prs_map.get(num)
+            if pr_row:
+                project_pr_map[num] = pr_row
+        for n in (p.all_github_pr_numbers or []):
+            num = _to_int(n)
+            if num <= 0 or num in project_pr_map:
+                continue
+            project_pr_map[num] = {
+                "number": num,
+                "title": f"PR #{num}",
+                "state": "unknown",
+                "html_url": _pr_url(num),
+            }
         issue_pr_links, enriched_subtasks = _build_issue_pr_subtask_links(
             p.all_github_issue_numbers or [],
             p.all_github_pr_numbers or [],
@@ -834,6 +1067,7 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
                 [project_pr_map[n] for n in sorted(project_pr_map.keys())],
             )
         )
+    _enforce_build_deadline(build_started, "subtask/evidence enrichment")
 
     contributor_high_risk_counts: Dict[str, int] = {}
     for p, meta, live_issues, live_prs in pre_reports:
@@ -858,6 +1092,7 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
         contributor = (tmp_project.project_owner_contributor or "").strip()
         if contributor and rpt.risk_level in ("HIGH", "CRITICAL"):
             contributor_high_risk_counts[contributor] = contributor_high_risk_counts.get(contributor, 0) + 1
+    _enforce_build_deadline(build_started, "risk pre-pass")
 
     reports: List[Dict[str, Any]] = []
     for p, meta, live_issues, live_prs in pre_reports:
@@ -884,6 +1119,86 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
             },
         )
 
+        normalized_issue_map: Dict[int, Dict[str, Any]] = {}
+        for issue_row in rpt.github_issue_evidence or []:
+            normalized = _normalize_issue_evidence_row(issue_row)
+            if not normalized:
+                continue
+            normalized_issue_map[int(normalized["number"])] = normalized
+        for num in project.all_github_issue_numbers or []:
+            issue_num = _to_int(num)
+            if issue_num <= 0 or issue_num in normalized_issue_map:
+                continue
+            normalized_issue_map[issue_num] = {
+                "number": issue_num,
+                "title": "",
+                "state": "unknown",
+                "labels": None,
+                "updated_at": "",
+                "html_url": _issue_url(issue_num),
+            }
+        normalized_issue_evidence = [
+            normalized_issue_map[k] for k in sorted(normalized_issue_map.keys())
+        ]
+
+        normalized_pr_map: Dict[int, Dict[str, Any]] = {}
+        for pr_row in rpt.github_pr_evidence or []:
+            normalized = _normalize_pr_evidence_row(pr_row)
+            if not normalized:
+                continue
+            normalized_pr_map[int(normalized["number"])] = normalized
+        for num in project.all_github_pr_numbers or []:
+            pr_num = _to_int(num)
+            if pr_num <= 0 or pr_num in normalized_pr_map:
+                continue
+            normalized_pr_map[pr_num] = {
+                "number": pr_num,
+                "title": "",
+                "state": "unknown",
+                "draft": None,
+                "updated_at": "",
+                "html_url": _pr_url(pr_num),
+            }
+        normalized_pr_evidence = [normalized_pr_map[k] for k in sorted(normalized_pr_map.keys())]
+
+        pr_url_by_number = {
+            int(item.get("number")): item.get("html_url")
+            for item in normalized_pr_evidence
+            if _to_int(item.get("number")) > 0 and _clean(item.get("html_url"))
+        }
+        normalized_ci_evidence = _normalize_ci_evidence_rows(rpt.ci_evidence or [], pr_url_by_number)
+        ci_pr_numbers_present = {
+            _to_int(row.get("pr_number"))
+            for row in normalized_ci_evidence
+            if _to_int(row.get("pr_number")) > 0
+        }
+        for pr_item in normalized_pr_evidence:
+            pr_num = _to_int(pr_item.get("number"))
+            if pr_num <= 0 or pr_num in ci_pr_numbers_present:
+                continue
+            if _clean(pr_item.get("state")).lower() != "open":
+                continue
+            normalized_ci_evidence.append(
+                {
+                    "source": "github_actions",
+                    "status": "unknown",
+                    "name": f"PR #{pr_num} CI signal",
+                    "summary": "CI/test status unavailable from connected Coral sources for this PR.",
+                    "html_url": _clean(pr_item.get("html_url")) or _pr_url(pr_num),
+                    "updated_at": _clean(pr_item.get("updated_at")),
+                    "pr_number": pr_num,
+                }
+            )
+            ci_pr_numbers_present.add(pr_num)
+
+        normalized_ci_evidence = sorted(
+            normalized_ci_evidence,
+            key=lambda row: (_to_int(row.get("pr_number")), _clean(row.get("name"))),
+        )
+        failing_ci_evidence_count = len(
+            [row for row in normalized_ci_evidence if _clean(row.get("status")).lower() == "failed"]
+        )
+
         subtasks = list(meta.get("subtasks") or [])
         total_subtasks = len(subtasks)
         completed_subtasks = len(
@@ -903,6 +1218,15 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
         project_status = _derive_project_status(subtasks)
         linked_issue_count = len(project.all_github_issue_numbers or [])
         linked_pr_count = len(project.all_github_pr_numbers or [])
+        risk_summary = _build_risk_summary(
+            rpt.risk_level,
+            rpt.risk_drivers or [],
+            blocked_subtasks,
+            rpt.open_linked_issue_count,
+            rpt.open_linked_pr_count,
+            rpt.stale_open_pr_count,
+            failing_ci_evidence_count,
+        )
 
         coral_query_flow_used = {
             "steps": [
@@ -949,18 +1273,45 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
             "all_github_pr_numbers": project.all_github_pr_numbers,
             "risk_score": rpt.risk_score,
             "risk_level": rpt.risk_level,
+            "risk_summary": risk_summary,
             "risk_drivers": rpt.risk_drivers,
             "recommendations": rpt.recommendations,
             "subtasks": subtasks,
             "issue_pr_links": meta.get("issue_pr_links") or [],
-            "github_issue_evidence": rpt.github_issue_evidence,
-            "github_pr_evidence": rpt.github_pr_evidence,
-            "ci_evidence": rpt.ci_evidence,
+            "github_issue_evidence": normalized_issue_evidence,
+            "github_pr_evidence": normalized_pr_evidence,
+            "ci_evidence": normalized_ci_evidence,
             "evidence_by_source": rpt.evidence_by_source,
             "coral_query_flow_used": coral_query_flow_used,
         }
         reports.append(report_dict)
+    _enforce_build_deadline(build_started, "final report assembly")
 
+    deduped_reports: List[Dict[str, Any]] = []
+    deduped_index: Dict[str, int] = {}
+    for report in reports:
+        key = _clean(report.get("project_id")) or _clean(report.get("project_name"))
+        if not key:
+            deduped_reports.append(report)
+            continue
+        if key not in deduped_index:
+            deduped_index[key] = len(deduped_reports)
+            deduped_reports.append(report)
+            continue
+
+        idx = deduped_index[key]
+        existing = deduped_reports[idx]
+        existing_subtasks = len(existing.get("subtasks") or [])
+        current_subtasks = len(report.get("subtasks") or [])
+        existing_score = _to_int(existing.get("risk_score"))
+        current_score = _to_int(report.get("risk_score"))
+
+        if current_subtasks > existing_subtasks or (
+            current_subtasks == existing_subtasks and current_score > existing_score
+        ):
+            deduped_reports[idx] = report
+
+    reports = deduped_reports
     reports = sorted(reports, key=lambda r: r.get("risk_score", 0), reverse=True)
     generated_at = _utc_now()
     REPORT_CACHE["reports"] = reports
@@ -1012,7 +1363,7 @@ def _run_snapshot_sync() -> Tuple[str, str]:
 def health():
     if not coral.available():
         return {
-            "product": "Sprint Tracker",
+            "product": "OmniSprint",
             "mode": "NOT_READY",
             "backend": "ok",
             "coral": "missing",
@@ -1052,7 +1403,7 @@ def health():
 
     connected_sources_count = len([s for s in sources if s["status"] == "connected"])
     return {
-        "product": "Sprint Tracker",
+        "product": "OmniSprint",
         "mode": mode,
         "demo_workspace": "Oppia",
         "planning_source": "Public quarterly targets sheet",
@@ -1275,11 +1626,28 @@ def post_generate_reminders(payload: dict):
     return {"count": len(reminders), "reminders": reminders}
 
 
-@app.post("/api/agent-query")
-def agent_query(payload: dict):
-    q = (payload or {}).get("question")
+@app.get("/api/activity/latest")
+def get_latest_activity(limit: int = 10):
+    from .agent_tools import get_latest_activity_summary
+
+    return get_latest_activity_summary(limit=limit)
+
+
+@app.post("/api/agent/ask")
+def agent_ask(payload: AgentAskRequest):
+    q = _clean(payload.question)
     if not q:
         raise HTTPException(status_code=400, detail="question required")
-    from .agent import handle_agent_query
+    from .gemini_agent import ask_agent
 
-    return handle_agent_query(q, coral)
+    return ask_agent(q)
+
+
+@app.post("/api/agent-query")
+def agent_query(payload: dict):
+    q = _clean((payload or {}).get("question"))
+    if not q:
+        raise HTTPException(status_code=400, detail="question required")
+    from .gemini_agent import ask_agent
+
+    return ask_agent(q)

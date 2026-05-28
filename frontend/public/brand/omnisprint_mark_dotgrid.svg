@@ -1,0 +1,14 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <title>OmniSprint Logo Mark - Dot Grid</title>
+  <desc>6 colored dots in 2×3 grid: blue, green, orange (top row), pink, purple, red (bottom row)</desc>
+  
+  <!-- Top row: Blue, Green, Orange -->
+  <circle cx="25" cy="25" r="15" fill="#3B82F6"/>
+  <circle cx="60" cy="25" r="15" fill="#10B981"/>
+  <circle cx="95" cy="25" r="15" fill="#F59E0B"/>
+  
+  <!-- Bottom row: Pink, Purple, Red -->
+  <circle cx="25" cy="95" r="15" fill="#EC4899"/>
+  <circle cx="60" cy="95" r="15" fill="#8B5CF6"/>
+  <circle cx="95" cy="95" r="15" fill="#EF4444"/>
+</svg>

@@ -1,12 +1,29 @@
 import hashlib
+import json
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import Project, Subtask
 
 
-_ISSUE_RE = re.compile(r"github\.com/[^/\s]+/[^/\s]+/issues/(\d+)", re.IGNORECASE)
-_PR_RE = re.compile(r"github\.com/[^/\s]+/[^/\s]+/pull/?(?:s/)?(\d+)", re.IGNORECASE)
+_ISSUE_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)", re.IGNORECASE)
+_PR_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/pull/?(?:s/)?(\d+)", re.IGNORECASE)
+_TARGET_REPO_SLUG = (
+    f"{(os.getenv('GITHUB_OWNER') or 'oppia').strip().lower()}/"
+    f"{(os.getenv('GITHUB_REPO') or 'oppia').strip().lower()}"
+)
+_NON_PROJECT_TITLE_PHRASES = [
+    "projects below are blocked on the other teams",
+    "leads need to collaborate in order to get unblock these projects",
+    "leads need to collaborate to unblock",
+    "projects below are blocked",
+    "other teams",
+    "for reference only",
+]
+_GEMINI_TITLE_DECISION_CACHE: Dict[str, bool] = {}
+_GEMINI_TITLE_CALL_COUNT = 0
+_GEMINI_TITLE_MAX_CALLS = max(0, int(os.getenv("OMNISPRINT_TITLE_GEMINI_MAX_CALLS", "2") or "2"))
 
 
 def _clean(val: Any) -> str:
@@ -18,10 +35,9 @@ def _clean(val: Any) -> str:
     return s
 
 
-def _extract_numbers_from_value(val: Any, pattern: re.Pattern[str]) -> List[int]:
-    if val is None:
-        return []
-    return [int(m) for m in pattern.findall(str(val))]
+def _to_bool(val: Any) -> bool:
+    text = _clean(val).lower()
+    return text in ("1", "true", "yes", "on")
 
 
 def _normalize_key(k: str) -> str:
@@ -75,13 +91,232 @@ def _project_id_from_name(name: str, salt: str = "") -> str:
     return f"proj-{digest}"
 
 
+def _row_signature(row: Dict[str, Any]) -> Tuple[Tuple[str, str], ...]:
+    items: List[Tuple[str, str]] = []
+    for k, v in row.items():
+        items.append((_normalize_key(str(k)), _clean(v)))
+    return tuple(sorted(items))
+
+
+def _subtask_signature(st: Subtask) -> Tuple[Any, ...]:
+    issue_nums: List[int] = []
+    for n in (st.github_issue_numbers or []):
+        try:
+            val = int(n)
+        except Exception:
+            continue
+        if val > 0:
+            issue_nums.append(val)
+    pr_nums: List[int] = []
+    for n in (st.github_pr_numbers or []):
+        try:
+            val = int(n)
+        except Exception:
+            continue
+        if val > 0:
+            pr_nums.append(val)
+    return (
+        _clean(st.subtask),
+        _clean(st.status),
+        _clean(st.assignee),
+        _clean(st.estimated_completion_date),
+        _clean(st.notes),
+        tuple(sorted(set(issue_nums))),
+        tuple(sorted(set(pr_nums))),
+    )
+
+
 def _collect_issue_pr_numbers(row: Dict[str, Any]) -> tuple[list[int], list[int]]:
     issues: List[int] = []
     prs: List[int] = []
     for v in row.values():
-        issues.extend(_extract_numbers_from_value(v, _ISSUE_RE))
-        prs.extend(_extract_numbers_from_value(v, _PR_RE))
+        if v is None:
+            continue
+        text = str(v)
+        for owner, repo, issue_num in _ISSUE_RE.findall(text):
+            if f"{owner}/{repo}".lower() != _TARGET_REPO_SLUG:
+                continue
+            try:
+                val = int(issue_num)
+            except Exception:
+                continue
+            if val > 0:
+                issues.append(val)
+        for owner, repo, pr_num in _PR_RE.findall(text):
+            if f"{owner}/{repo}".lower() != _TARGET_REPO_SLUG:
+                continue
+            try:
+                val = int(pr_num)
+            except Exception:
+                continue
+            if val > 0:
+                prs.append(val)
     return sorted(set(issues)), sorted(set(prs))
+
+
+def _looks_like_github_work_item_reference(text: str) -> bool:
+    value = _clean(text)
+    if not value:
+        return False
+    issue_match = _ISSUE_RE.search(value)
+    if issue_match and f"{issue_match.group(1)}/{issue_match.group(2)}".lower() == _TARGET_REPO_SLUG:
+        return True
+    pr_match = _PR_RE.search(value)
+    if pr_match and f"{pr_match.group(1)}/{pr_match.group(2)}".lower() == _TARGET_REPO_SLUG:
+        return True
+    return False
+
+
+def _looks_like_non_project_heading_title(title: str) -> bool:
+    text = _clean(title)
+    if not text:
+        return False
+    low = text.lower()
+    if _looks_like_github_work_item_reference(text):
+        return True
+    if any(phrase in low for phrase in _NON_PROJECT_TITLE_PHRASES):
+        return True
+    if low.startswith("projects below"):
+        return True
+    words = re.findall(r"[a-z0-9]+", low)
+    word_count = len(words)
+    sentence_like = (
+        ("need to" in low or "should " in low or "please " in low or "in order to" in low)
+        and word_count >= 8
+    )
+    blocked_collab = (
+        word_count >= 7
+        and "blocked" in low
+        and ("team" in low or "teams" in low)
+        and ("lead" in low or "leads" in low or "collaborate" in low)
+    )
+    return sentence_like or blocked_collab
+
+
+def _is_ambiguous_project_title(
+    title: str,
+    description: str,
+    lead: str,
+    contributor: str,
+    planned: str,
+    row: Dict[str, Any],
+) -> bool:
+    text = _clean(title)
+    if not text:
+        return False
+    low = text.lower()
+    words = re.findall(r"[a-z0-9]+", low)
+    word_count = len(words)
+    if word_count < 7:
+        return False
+    has_owner_or_date = any([_clean(lead), _clean(contributor), _clean(planned)])
+    if has_owner_or_date:
+        return False
+    issue_nums, pr_nums = _collect_issue_pr_numbers(row)
+    has_github_signal = bool(issue_nums or pr_nums)
+    if has_github_signal:
+        return False
+    # Long sentence-like titles with little project metadata are ambiguous.
+    sentence_markers = ["need to", "should", "please", "in order to", "below", "blocked", "teams"]
+    marker_hits = sum(1 for m in sentence_markers if m in low)
+    if marker_hits >= 2:
+        return True
+    if _clean(description) and _clean(description) != text:
+        return False
+    return word_count >= 11
+
+
+def _gemini_title_is_real_project(
+    title: str,
+    description: str,
+    lead: str,
+    contributor: str,
+    planned: str,
+) -> Optional[bool]:
+    global _GEMINI_TITLE_CALL_COUNT
+    enabled = _to_bool(os.getenv("OMNISPRINT_TITLE_GEMINI_ENABLED", "1"))
+    api_key = _clean(os.getenv("GEMINI_API_KEY"))
+    if not enabled or not api_key:
+        return None
+    if _GEMINI_TITLE_CALL_COUNT >= _GEMINI_TITLE_MAX_CALLS:
+        return None
+
+    model = _clean(os.getenv("GEMINI_MODEL")) or "gemini-2.5-flash"
+    cache_key = " | ".join([_clean(title), _clean(description), _clean(lead), _clean(contributor), _clean(planned)])
+    if cache_key in _GEMINI_TITLE_DECISION_CACHE:
+        return _GEMINI_TITLE_DECISION_CACHE[cache_key]
+
+    prompt = (
+        "Classify whether this row title is a real software project title or a section/header sentence. "
+        "Return ONLY JSON: {\"is_project\": true|false}. "
+        f"title={_clean(title)!r}; description={_clean(description)!r}; "
+        f"owner_lead={_clean(lead)!r}; owner_contributor={_clean(contributor)!r}; planned_date={_clean(planned)!r}"
+    )
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+        try:
+            cfg = types.GenerateContentConfig(
+                max_output_tokens=20,
+                temperature=0.0,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            )
+        except Exception:
+            cfg = types.GenerateContentConfig(
+                max_output_tokens=20,
+                temperature=0.0,
+            )
+        _GEMINI_TITLE_CALL_COUNT += 1
+        resp = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=cfg,
+        )
+        text = _clean(getattr(resp, "text", ""))
+        if not text:
+            return None
+        parsed = None
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            if "```" in text:
+                for block in text.split("```"):
+                    candidate = block.strip()
+                    if candidate.startswith("json"):
+                        candidate = candidate[4:].strip()
+                    try:
+                        parsed = json.loads(candidate)
+                        break
+                    except Exception:
+                        continue
+        if not isinstance(parsed, dict):
+            return None
+        decision = bool(parsed.get("is_project"))
+        _GEMINI_TITLE_DECISION_CACHE[cache_key] = decision
+        return decision
+    except Exception:
+        return None
+
+
+def _should_start_project_for_title(
+    title: str,
+    description: str,
+    lead: str,
+    contributor: str,
+    planned: str,
+    row: Dict[str, Any],
+) -> bool:
+    if not _clean(title):
+        return False
+    if _looks_like_non_project_heading_title(title):
+        return False
+    if _is_ambiguous_project_title(title, description, lead, contributor, planned, row):
+        llm = _gemini_title_is_real_project(title, description, lead, contributor, planned)
+        if llm is not None:
+            return llm
+    return True
 
 
 def _guess_project_title(explicit_title: str, description: str) -> str:
@@ -253,10 +488,27 @@ def group_roadmap_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
         )
         source_mode = _clean(_find_field(row, ["source_mode"]))
 
-        has_project_level_signal = any([description, lead, contributor, planned, debugging])
         has_strong_project_signal = any([description, lead, contributor, debugging])
+        title_is_project_candidate = _should_start_project_for_title(
+            explicit_title,
+            description,
+            lead,
+            contributor,
+            planned,
+            row,
+        ) if explicit_title else False
+
+        if explicit_title and not title_is_project_candidate:
+            # Section/header rows should not become projects.
+            # If the row still carries subtask evidence, keep it under current project.
+            separator_subtask = _build_subtask(row)
+            if current is not None and separator_subtask is not None:
+                current.raw_project_rows.append(row)
+                current.subtasks.append(separator_subtask)
+            continue
+
         starts_new_project = False
-        if explicit_title:
+        if title_is_project_candidate:
             if current is None:
                 starts_new_project = True
             elif legacy_mode:
@@ -312,7 +564,63 @@ def group_roadmap_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
     if current is not None:
         projects.append(current)
 
+    # Merge accidental duplicate project blocks with the same project_id.
+    merged_projects: Dict[str, Project] = {}
+    ordered_project_ids: List[str] = []
     for project in projects:
+        pid = _clean(project.project_id)
+        if not pid:
+            continue
+        existing = merged_projects.get(pid)
+        if existing is None:
+            merged_projects[pid] = project
+            ordered_project_ids.append(pid)
+            continue
+
+        # Keep first non-empty project-level values.
+        if not _clean(existing.project_name) and _clean(project.project_name):
+            existing.project_name = project.project_name
+        if not _clean(existing.project_description) and _clean(project.project_description):
+            existing.project_description = project.project_description
+        if not _clean(existing.project_owner_lead) and _clean(project.project_owner_lead):
+            existing.project_owner_lead = project.project_owner_lead
+        if not _clean(existing.project_owner_contributor) and _clean(project.project_owner_contributor):
+            existing.project_owner_contributor = project.project_owner_contributor
+        if not _clean(existing.planned_completion_date) and _clean(project.planned_completion_date):
+            existing.planned_completion_date = project.planned_completion_date
+        if not _clean(existing.debugging_doc_link) and _clean(project.debugging_doc_link):
+            existing.debugging_doc_link = project.debugging_doc_link
+        if not _clean(existing.source_mode) and _clean(project.source_mode):
+            existing.source_mode = project.source_mode
+
+        existing.raw_project_rows.extend(project.raw_project_rows or [])
+        existing.subtasks.extend(project.subtasks or [])
+
+    projects = [merged_projects[pid] for pid in ordered_project_ids]
+
+    for project in projects:
+        # Deduplicate raw rows within each project.
+        seen_rows = set()
+        uniq_rows: List[Dict[str, Any]] = []
+        for raw_row in project.raw_project_rows or []:
+            sig = _row_signature(raw_row)
+            if sig in seen_rows:
+                continue
+            seen_rows.add(sig)
+            uniq_rows.append(raw_row)
+        project.raw_project_rows = uniq_rows
+
+        # Deduplicate subtasks within each project.
+        seen_subtasks = set()
+        uniq_subtasks: List[Subtask] = []
+        for subtask in project.subtasks or []:
+            sig = _subtask_signature(subtask)
+            if sig in seen_subtasks:
+                continue
+            seen_subtasks.add(sig)
+            uniq_subtasks.append(subtask)
+        project.subtasks = uniq_subtasks
+
         all_issue_numbers: List[int] = []
         all_pr_numbers: List[int] = []
         for subtask in project.subtasks:

@@ -3,6 +3,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import re
 from contextlib import nullcontext
 from pathlib import Path
@@ -10,8 +11,18 @@ from typing import Dict, List, Optional, Sequence
 
 
 GITHUB_URL_RE = re.compile(r"https?://github\.com/[^\s,)\]]+", re.IGNORECASE)
-ISSUE_URL_RE = re.compile(r"github\.com/[^/\s]+/[^/\s]+/issues/(\d+)", re.IGNORECASE)
-PR_URL_RE = re.compile(r"github\.com/[^/\s]+/[^/\s]+/pull/?(?:s/)?(\d+)", re.IGNORECASE)
+ISSUE_URL_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)", re.IGNORECASE)
+PR_URL_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/pull/?(?:s/)?(\d+)", re.IGNORECASE)
+TARGET_REPO_SLUG = (
+    f"{(os.getenv('GITHUB_OWNER') or 'oppia').strip().lower()}/"
+    f"{(os.getenv('GITHUB_REPO') or 'oppia').strip().lower()}"
+)
+NON_PROJECT_TITLE_PHRASES = [
+    "projects below are blocked on the other teams",
+    "leads need to collaborate in order to get unblock these projects",
+    "leads need to collaborate to unblock",
+    "projects below are blocked",
+]
 
 
 def _clean(value: Optional[str]) -> str:
@@ -74,6 +85,21 @@ def _extract_project_name(project_description: str) -> str:
     return lines[0]
 
 
+def _looks_like_non_project_heading(project_name: str) -> bool:
+    text = _clean(project_name)
+    if not text:
+        return False
+    low = text.lower()
+    if any(phrase in low for phrase in NON_PROJECT_TITLE_PHRASES):
+        return True
+    if low.startswith("projects below"):
+        return True
+    words = re.findall(r"[a-z0-9]+", low)
+    if len(words) >= 8 and ("need to" in low or "in order to" in low):
+        return True
+    return False
+
+
 def _extract_github_links(cells: Sequence[str]) -> List[str]:
     urls: List[str] = []
     for cell in cells:
@@ -93,8 +119,14 @@ def _extract_issue_pr_numbers(cells: Sequence[str]) -> tuple[List[int], List[int
     prs: List[int] = []
     for cell in cells:
         text = str(cell or "")
-        issues.extend(int(m) for m in ISSUE_URL_RE.findall(text))
-        prs.extend(int(m) for m in PR_URL_RE.findall(text))
+        for owner, repo, issue_num in ISSUE_URL_RE.findall(text):
+            if f"{owner}/{repo}".lower() != TARGET_REPO_SLUG:
+                continue
+            issues.append(int(issue_num))
+        for owner, repo, pr_num in PR_URL_RE.findall(text):
+            if f"{owner}/{repo}".lower() != TARGET_REPO_SLUG:
+                continue
+            prs.append(int(pr_num))
     return sorted(set(issues)), sorted(set(prs))
 
 
@@ -137,6 +169,8 @@ def build_jsonl(input_csv: Path, output_jsonl: Path, links_output_jsonl: Optiona
     project_counter = 0
     written = 0
     links_written = 0
+    seen_records = set()
+    seen_links = set()
 
     links_context = (
         links_output_jsonl.open("w", encoding="utf-8")
@@ -154,6 +188,8 @@ def build_jsonl(input_csv: Path, output_jsonl: Path, links_output_jsonl: Optiona
 
             project_description = _value_at(row, idx_project_description)
             project_name = _extract_project_name(project_description)
+            if _looks_like_non_project_heading(project_name):
+                project_name = ""
             owner_lead = _value_at(row, idx_owner_lead)
             owner_contributor = _value_at(row, idx_owner_contributor)
             planned_completion_date = _value_at(row, idx_planned)
@@ -192,6 +228,24 @@ def build_jsonl(input_csv: Path, output_jsonl: Path, links_output_jsonl: Optiona
                 "source_mode": "SNAPSHOT",
             }
 
+            record_key = (
+                record["project_id"],
+                record["project_name"],
+                record["project_description"],
+                record["project_owner_lead"],
+                record["project_owner_contributor"],
+                record["planned_completion_date"],
+                record["subtask"],
+                record["estimated_completion_date"],
+                record["status"],
+                record["assignee"],
+                record["notes"],
+                record["github_links"],
+                record["debugging_doc_link"],
+            )
+            if record_key in seen_records:
+                continue
+            seen_records.add(record_key)
             out.write(json.dumps(record, ensure_ascii=True) + "\n")
             written += 1
 
@@ -205,6 +259,15 @@ def build_jsonl(input_csv: Path, output_jsonl: Path, links_output_jsonl: Optiona
                         "link_number": int(issue_num),
                         "source_mode": "SNAPSHOT",
                     }
+                    link_key = (
+                        link_record["project_id"],
+                        link_record["subtask"],
+                        link_record["link_type"],
+                        int(link_record["link_number"]),
+                    )
+                    if link_key in seen_links:
+                        continue
+                    seen_links.add(link_key)
                     links_out.write(json.dumps(link_record, ensure_ascii=True) + "\n")
                     links_written += 1
                 for pr_num in pr_numbers:
@@ -216,6 +279,15 @@ def build_jsonl(input_csv: Path, output_jsonl: Path, links_output_jsonl: Optiona
                         "link_number": int(pr_num),
                         "source_mode": "SNAPSHOT",
                     }
+                    link_key = (
+                        link_record["project_id"],
+                        link_record["subtask"],
+                        link_record["link_type"],
+                        int(link_record["link_number"]),
+                    )
+                    if link_key in seen_links:
+                        continue
+                    seen_links.add(link_key)
                     links_out.write(json.dumps(link_record, ensure_ascii=True) + "\n")
                     links_written += 1
 

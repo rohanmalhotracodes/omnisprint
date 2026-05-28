@@ -54,7 +54,7 @@ else
   echo "Warning: Could not add GitHub source automatically. If you want live GitHub data, set GITHUB_TOKEN in .env and retry."
 fi
 
-# Register only required sources for Sprint Tracker.
+# Register only required sources for OmniSprint.
 register "$ROOT_DIR/coral/sources/oppia_roadmap_sheet.yaml" || true
 register "$ROOT_DIR/coral/sources/oppia_team_sheet.yaml" || true
 

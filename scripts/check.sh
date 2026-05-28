@@ -4,7 +4,7 @@ set -u
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "Running environment checks for Sprint Tracker"
+echo "Running environment checks for OmniSprint"
 
 errors=0
 
