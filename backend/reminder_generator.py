@@ -35,9 +35,9 @@ def _threshold_allows(risk_level: str, risk_threshold: str) -> bool:
 def _build_links(report: Dict[str, Any]) -> tuple[list[str], list[str]]:
     issue_links: List[str] = []
     pr_links: List[str] = []
-    repo_slug = os.getenv("GITHUB_REPO_FULL_NAME") or "oppia/oppia"
+    repo_slug = os.getenv("GITHUB_REPO_FULL_NAME") or "your-org/your-repo"
     if "/" not in repo_slug:
-        owner = os.getenv("GITHUB_OWNER", "oppia")
+        owner = os.getenv("GITHUB_OWNER", "your-org")
         repo_slug = f"{owner}/{repo_slug}"
 
     for i in report.get("github_issue_evidence") or []:

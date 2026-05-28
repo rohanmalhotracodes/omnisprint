@@ -88,12 +88,10 @@ export type HealthResponse = {
   backend: string
   coral: string
   mode: 'LIVE' | 'HYBRID' | 'NOT_READY'
+  workspace?: string
   target_repo?: string
-  demo_workspace?: string
   planning_source?: string
   engineering_source?: string
-  demo_planning_source?: string
-  demo_engineering_source?: string
   connected_sources_count: number
   sources: SourceInfo[]
 }
@@ -315,7 +313,13 @@ export async function fetchLatestActivity(limit = 8) {
   })
 }
 
-export async function syncRoadmap() {
+export async function syncPlanning() {
+  const preferred = await optionalRequest<Record<string, any>>('/api/sync-planning', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  if (preferred) return preferred
   return optionalRequest<Record<string, any>>('/api/sync-roadmap', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -9,7 +9,7 @@ Kartik Suryavanshi,Lead (Active),"1. Manage's project ownership and team coordin
 
 ",- Working on GSoC project.,"Frontend Issues
 
-Wants to develop coding/debugging skills. Prefers learner-facing projects that directly impact Oppia’s educational goals, so he can see how his contributions improve the UX. Prefers Angular/TS projects, but also open to Python ones.
+Wants to develop coding/debugging skills. Prefers learner-facing projects that directly impact Workspace’s educational goals, so he can see how his contributions improve the UX. Prefers Angular/TS projects, but also open to Python ones.
 
 Wants to gain experience for GSoC. Wants to complete Flashbacks project before GSoC",IST (UTC+5:30),Mostly available everyday after 10:00 AM,kartiknileshs@gmail.com,9 Oct 2024,KartikSuryavanshi,"PRs reviewed (mentor: Mohit):
 
@@ -37,9 +37,9 @@ Wants to develop coding/debugging/design skills and leadership skills.",IST (UTC
 - PR #21513 (1/2 credit)
 - PR #22538 (in progress)",
 Yash Bahuguna,Member (Active),"Collaborator: 
-1. working on infrastructure-related issues","In ""send pending review notification"" workflow, old discussions are not being deleted: https://github.com/oppia/oppia/issues/22820 
+1. working on infrastructure-related issues","In ""send pending review notification"" workflow, old discussions are not being deleted: https://github.com/your-org/your-repo/issues/22820 
 
-UnboundLocalError: local variable 'updated_pr_dict' referenced before assignment (Send Pending Reviews Notification  https://github.com/oppia/oppia/issues/22820 ","Hand over project to build from scratch 
+UnboundLocalError: local variable 'updated_pr_dict' referenced before assignment (Send Pending Reviews Notification  https://github.com/your-org/your-repo/issues/22820 ","Hand over project to build from scratch 
 assing one from below 2:
 
 TDD - Remote Configuration of Android Feature Flags & Platform Parameters via Web
@@ -47,12 +47,12 @@ TDD: Web Implementation Of Flashbacks Feature","I want to mainly work on:
 - DevOps
 - Infra issues",IST (UTC+5:30),6-7 PM,yashbahuguna918@gmail.com,9 Dec 2025,yashbhu,,
 Tanmay Goyal,Member (Active),"Collaborator :
-1. Took ownership of the Q2 tracker project - Fix the most occurring flakes","Assign two groups from  https://github.com/oppia/oppia/issues/23496
+1. Took ownership of the Q2 tracker project - Fix the most occurring flakes","Assign two groups from  https://github.com/your-org/your-repo/issues/23496
 ",- Working on Fixing the most occurring flakes project,Wants to work on Frontend Issues,IST (UTC+5:30),after 18:00 anytime,"
 tanmaygoyal0712@gmail.com",18 Jan 2026,tanmaygoyal2007,,
 Deepanshu Yadav,Member (Active),"Collaborator: (Having Exam Till 31st May)
 
-1. Took ownership of the Q2 tracker project - Fix the most occurring flakes",- Working Fixing the most occurring flakes project,Assign two groups from  https://github.com/oppia/oppia/issues/23496,"- Wants to fix flakes and CI failures.
+1. Took ownership of the Q2 tracker project - Fix the most occurring flakes",- Working Fixing the most occurring flakes project,Assign two groups from  https://github.com/your-org/your-repo/issues/23496,"- Wants to fix flakes and CI failures.
 - Likes to work on frontend related issues(Open to backend issues too.)",IST (UTC+5:30),,ydeepu1125@gmail.com,31 Jan 2026,KURO-1125,,
 Brian Rodriguez,Member (Active),"Memeber: 
 
@@ -69,8 +69,8 @@ Somnath Mishra,Member (Active),"Collaborator:
 
 - Fine with full stack issues.",IST (UTC+5:30),,somnath012003@gmail.com,10 Feb 2026,somnath-mishra,,
 Rohan Malhotra,Member (Active),,"- Fix #10162: Non-currency input invalid error 
-https://github.com/oppia/oppia/pull/25831.            -Fix #18140: make NumericInput exponent support configurable and fix the helper text
-https://github.com/oppia/oppia/pull/25789",Will be working on All blog page issues + RTE issues project with Simran,"- Fronted issue  
+https://github.com/your-org/your-repo/pull/25831.            -Fix #18140: make NumericInput exponent support configurable and fix the helper text
+https://github.com/your-org/your-repo/pull/25789",Will be working on All blog page issues + RTE issues project with Simran,"- Fronted issue  
 - Learn over time and start with full stack issues. Away till 21st may ",IST (UTC+5:30),,"
 rohanmalhotra430@gmail.com
 ",22 Mar 2026,rohanmalhotracodes,,
@@ -78,20 +78,20 @@ Sourav Bera,Member (Active),"Collaborator:
 
 1. Took ownership of Q2 tracker project - Launch Study Guides + all the project board issues","
 - Redirect the 'subtopic' handler to the 'subtopic_with_study_guide_migration' handler in android.py
-https://github.com/oppia/oppia/issues/25518 ",- Deprecate the show_restructured_study_guides feature flag https://github.com/oppia/oppia/issues/25520,"- Frontend and backend issues 
+https://github.com/your-org/your-repo/issues/25518 ",- Deprecate the show_restructured_study_guides feature flag https://github.com/your-org/your-repo/issues/25520,"- Frontend and backend issues 
 ",IST (UTC+5:30),Thu / Sat / Sun - 17:00-19:00,sbera987654321@gmail.com,22 Mar 2026,sbera01,,
 Simran Kaur,Member (Active),"Collaborator:  
-(Will be away till 12 Jun)","- Fix #18503: Update font family for LaTeX https://github.com/oppia/oppia/pull/25864
-- Fix #18371: Fix schema validation error for decimal answers in NumericInput interactions  https://github.com/oppia/oppia/pull/25972
--Fix #15455: Make schema-validators context aware https://github.com/oppia/oppia/pull/26029",- Will be working on All blog page issues + RTE issues project with Rohan,"Like to work on issues that are user phasing, frontend issue",IST (UTC+5:30),6:00 - 7:00 PM,simrankaur47937@gmail.com,29 Mar 2026,arkia09,,
-Aditya Lakhotia,Member (Active),Collaborator: (Away till 1st June),- Assign two groups from - https://github.com/oppia/oppia/issues/23496,,- Frontend issues & solving flakes.,IST (UTC+5:30),Fri/Sat/Sun after 20:30 anytime,"
+(Will be away till 12 Jun)","- Fix #18503: Update font family for LaTeX https://github.com/your-org/your-repo/pull/25864
+- Fix #18371: Fix schema validation error for decimal answers in NumericInput interactions  https://github.com/your-org/your-repo/pull/25972
+-Fix #15455: Make schema-validators context aware https://github.com/your-org/your-repo/pull/26029",- Will be working on All blog page issues + RTE issues project with Rohan,"Like to work on issues that are user phasing, frontend issue",IST (UTC+5:30),6:00 - 7:00 PM,simrankaur47937@gmail.com,29 Mar 2026,arkia09,,
+Aditya Lakhotia,Member (Active),Collaborator: (Away till 1st June),- Assign two groups from - https://github.com/your-org/your-repo/issues/23496,,- Frontend issues & solving flakes.,IST (UTC+5:30),Fri/Sat/Sun after 20:30 anytime,"
 adityalakhotia21@gmail.com",19 Apr 2026,Aditya22-smart,,
 Meeth Gangwar,Member (Active),"Memeber: 
 
-1. WebPack Removal ",Working on Webpack removal PR: https://github.com/oppia/oppia/pull/26078,Moving to core team after complition of WEBPACK project,"I want to mainly work on:
+1. WebPack Removal ",Working on Webpack removal PR: https://github.com/your-org/your-repo/pull/26078,Moving to core team after complition of WEBPACK project,"I want to mainly work on:
 - Server errors
 - Backend issues",IST (UTC+5:30),,gangwarmeeth@gmail.com,9 Dec 2025,Meeth-webdev,,
-Arnav Narula,Member (Active),Collaborator:,- Assign two groups from - https://github.com/oppia/oppia/issues/23496 ,,"- Front issues & Acceptance tests issues, flakes",IST (UTC+5:30),6:00 PM-7:00 PM,"
+Arnav Narula,Member (Active),Collaborator:,- Assign two groups from - https://github.com/your-org/your-repo/issues/23496 ,,"- Front issues & Acceptance tests issues, flakes",IST (UTC+5:30),6:00 PM-7:00 PM,"
 arnavnarula25@gmail.com",19 Apr 2026,arnav25102004,,
 Mohit Ruwatia,Former Member,"Member: 
 

@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import Project, Subtask
@@ -9,10 +10,6 @@ from .models import Project, Subtask
 
 _ISSUE_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)", re.IGNORECASE)
 _PR_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/pull/?(?:s/)?(\d+)", re.IGNORECASE)
-_TARGET_REPO_SLUG = (
-    f"{(os.getenv('GITHUB_OWNER') or 'oppia').strip().lower()}/"
-    f"{(os.getenv('GITHUB_REPO') or 'oppia').strip().lower()}"
-)
 _NON_PROJECT_TITLE_PHRASES = [
     "projects below are blocked on the other teams",
     "leads need to collaborate in order to get unblock these projects",
@@ -40,6 +37,17 @@ def _to_bool(val: Any) -> bool:
     return text in ("1", "true", "yes", "on")
 
 
+def _target_repo_slug() -> str:
+    owner = (os.getenv("GITHUB_OWNER") or "your-org").strip().lower()
+    repo = (os.getenv("GITHUB_REPO") or "your-repo").strip().lower()
+    return f"{owner}/{repo}"
+
+
+def _match_target_repo_only() -> bool:
+    # Generic default: parse links from any GitHub repo unless explicitly restricted.
+    return _to_bool(os.getenv("GITHUB_MATCH_TARGET_REPO_ONLY", "0"))
+
+
 def _normalize_key(k: str) -> str:
     if not k:
         return ""
@@ -52,6 +60,219 @@ def _normalize_key(k: str) -> str:
 
 def _normalized_items(row: Dict[str, Any]) -> List[Tuple[str, str, Any]]:
     return [(k, _normalize_key(k), v) for k, v in row.items()]
+
+
+def _candidate_list(defaults: List[str], env_key: str) -> List[str]:
+    raw_extra = _clean(os.getenv(env_key))
+    extras = [part.strip() for part in raw_extra.split(",")] if raw_extra else []
+    out: List[str] = []
+    seen = set()
+    for candidate in list(defaults) + extras:
+        key = _normalize_key(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+    return out
+
+
+_PROJECT_TITLE_DEFAULTS = [
+    "project",
+    "project title",
+    "project name",
+    "project_name",
+    "key goals",
+    "goal",
+    "target",
+    "epic",
+    "epic name",
+    "initiative",
+    "milestone",
+    "workstream",
+    "program",
+    "feature",
+]
+_PROJECT_DESCRIPTION_DEFAULTS = [
+    "project description",
+    "description",
+    "project_description",
+    "impact",
+    "objective",
+    "details",
+    "overview",
+]
+_LEAD_DEFAULTS = [
+    "project owner leads",
+    "project owner lead",
+    "project_owner_lead",
+    "owner leads",
+    "lead",
+    "lead owner",
+    "owner lead",
+    "project lead",
+    "engineering lead",
+    "team lead",
+    "manager",
+]
+_CONTRIBUTOR_DEFAULTS = [
+    "project owner contributor",
+    "project_owner_contributor",
+    "owner contributor",
+    "contributor",
+    "owner",
+    "primary contributor",
+    "developer",
+]
+_PLANNED_DATE_DEFAULTS = [
+    "planned completion date",
+    "planned completion",
+    "planned date",
+    "planned_date",
+    "target date",
+    "target completion date",
+    "due date",
+    "eta",
+    "end date",
+]
+_SUBTASK_DEFAULTS = [
+    "subtasks",
+    "subtask",
+    "sub tasks",
+    "task",
+    "task summary",
+    "summary",
+    "issue summary",
+    "story",
+    "ticket",
+    "work item",
+    "notes / links for subtasks",
+]
+_STATUS_DEFAULTS = [
+    "status",
+    "state",
+    "workflow status",
+]
+_ASSIGNEE_DEFAULTS = [
+    "assignee",
+    "assigned to",
+    "assigned",
+    "owner",
+    "developer",
+]
+_ESTIMATED_DATE_DEFAULTS = [
+    "est completion date",
+    "est. completion date",
+    "estimated completion date",
+    "estimated_completion_date",
+    "estimated date",
+    "eta",
+]
+_NOTES_DEFAULTS = [
+    "notes / links for subtasks",
+    "notes",
+    "notes links",
+    "links",
+    "comments",
+    "comment",
+    "details",
+]
+_DEBUG_LINK_DEFAULTS = [
+    "link to active debugging doc",
+    "debugging_doc_link",
+    "debugging doc",
+    "debugging link",
+    "runbook",
+    "documentation",
+    "doc link",
+]
+
+
+@lru_cache(maxsize=1)
+def _project_title_fields() -> List[str]:
+    return _candidate_list(
+        _PROJECT_TITLE_DEFAULTS,
+        "PLANNING_FIELD_PROJECT_TITLE",
+    )
+
+
+@lru_cache(maxsize=1)
+def _project_description_fields() -> List[str]:
+    return _candidate_list(
+        _PROJECT_DESCRIPTION_DEFAULTS,
+        "PLANNING_FIELD_PROJECT_DESCRIPTION",
+    )
+
+
+@lru_cache(maxsize=1)
+def _lead_fields() -> List[str]:
+    return _candidate_list(
+        _LEAD_DEFAULTS,
+        "PLANNING_FIELD_OWNER_LEAD",
+    )
+
+
+@lru_cache(maxsize=1)
+def _contributor_fields() -> List[str]:
+    return _candidate_list(
+        _CONTRIBUTOR_DEFAULTS,
+        "PLANNING_FIELD_OWNER_CONTRIBUTOR",
+    )
+
+
+@lru_cache(maxsize=1)
+def _planned_date_fields() -> List[str]:
+    return _candidate_list(
+        _PLANNED_DATE_DEFAULTS,
+        "PLANNING_FIELD_PLANNED_DATE",
+    )
+
+
+@lru_cache(maxsize=1)
+def _subtask_fields() -> List[str]:
+    return _candidate_list(
+        _SUBTASK_DEFAULTS,
+        "PLANNING_FIELD_SUBTASK",
+    )
+
+
+@lru_cache(maxsize=1)
+def _status_fields() -> List[str]:
+    return _candidate_list(
+        _STATUS_DEFAULTS,
+        "PLANNING_FIELD_STATUS",
+    )
+
+
+@lru_cache(maxsize=1)
+def _assignee_fields() -> List[str]:
+    return _candidate_list(
+        _ASSIGNEE_DEFAULTS,
+        "PLANNING_FIELD_ASSIGNEE",
+    )
+
+
+@lru_cache(maxsize=1)
+def _estimated_date_fields() -> List[str]:
+    return _candidate_list(
+        _ESTIMATED_DATE_DEFAULTS,
+        "PLANNING_FIELD_ESTIMATED_DATE",
+    )
+
+
+@lru_cache(maxsize=1)
+def _notes_fields() -> List[str]:
+    return _candidate_list(
+        _NOTES_DEFAULTS,
+        "PLANNING_FIELD_NOTES",
+    )
+
+
+@lru_cache(maxsize=1)
+def _debug_link_fields() -> List[str]:
+    return _candidate_list(
+        _DEBUG_LINK_DEFAULTS,
+        "PLANNING_FIELD_DEBUG_LINK",
+    )
 
 
 def _find_field(row: Dict[str, Any], candidates: List[str]) -> Any:
@@ -129,12 +350,14 @@ def _subtask_signature(st: Subtask) -> Tuple[Any, ...]:
 def _collect_issue_pr_numbers(row: Dict[str, Any]) -> tuple[list[int], list[int]]:
     issues: List[int] = []
     prs: List[int] = []
+    target_slug = _target_repo_slug()
+    match_only_target = _match_target_repo_only()
     for v in row.values():
         if v is None:
             continue
         text = str(v)
         for owner, repo, issue_num in _ISSUE_RE.findall(text):
-            if f"{owner}/{repo}".lower() != _TARGET_REPO_SLUG:
+            if match_only_target and f"{owner}/{repo}".lower() != target_slug:
                 continue
             try:
                 val = int(issue_num)
@@ -143,7 +366,7 @@ def _collect_issue_pr_numbers(row: Dict[str, Any]) -> tuple[list[int], list[int]
             if val > 0:
                 issues.append(val)
         for owner, repo, pr_num in _PR_RE.findall(text):
-            if f"{owner}/{repo}".lower() != _TARGET_REPO_SLUG:
+            if match_only_target and f"{owner}/{repo}".lower() != target_slug:
                 continue
             try:
                 val = int(pr_num)
@@ -158,11 +381,19 @@ def _looks_like_github_work_item_reference(text: str) -> bool:
     value = _clean(text)
     if not value:
         return False
+    target_slug = _target_repo_slug()
+    match_only_target = _match_target_repo_only()
     issue_match = _ISSUE_RE.search(value)
-    if issue_match and f"{issue_match.group(1)}/{issue_match.group(2)}".lower() == _TARGET_REPO_SLUG:
+    if issue_match and (
+        not match_only_target
+        or f"{issue_match.group(1)}/{issue_match.group(2)}".lower() == target_slug
+    ):
         return True
     pr_match = _PR_RE.search(value)
-    if pr_match and f"{pr_match.group(1)}/{pr_match.group(2)}".lower() == _TARGET_REPO_SLUG:
+    if pr_match and (
+        not match_only_target
+        or f"{pr_match.group(1)}/{pr_match.group(2)}".lower() == target_slug
+    ):
         return True
     return False
 
@@ -345,44 +576,11 @@ def _is_legacy_flattened_row(row: Dict[str, Any]) -> bool:
 
 
 def _build_subtask(row: Dict[str, Any]) -> Optional[Subtask]:
-    subtask = _clean(
-        _find_field(
-            row,
-            [
-                "subtasks",
-                "subtask",
-                "sub tasks",
-                "task",
-                "notes / links for subtasks",
-            ],
-        )
-    )
-    status = _clean(_find_field(row, ["status", "state"]))
-    assignee = _clean(_find_field(row, ["assignee", "assigned to", "assigned"]))
-    estimated = _clean(
-        _find_field(
-            row,
-            [
-                "est completion date",
-                "est. completion date",
-                "estimated completion date",
-                "estimated_completion_date",
-                "estimated date",
-            ],
-        )
-    )
-    notes = _clean(
-        _find_field(
-            row,
-            [
-                "notes / links for subtasks",
-                "notes",
-                "notes links",
-                "links",
-                "comments",
-            ],
-        )
-    )
+    subtask = _clean(_find_field(row, _subtask_fields()))
+    status = _clean(_find_field(row, _status_fields()))
+    assignee = _clean(_find_field(row, _assignee_fields()))
+    estimated = _clean(_find_field(row, _estimated_date_fields()))
+    notes = _clean(_find_field(row, _notes_fields()))
 
     issue_nums, pr_nums = _collect_issue_pr_numbers(row)
     has_any_signal = any([subtask, status, assignee, estimated, notes, issue_nums, pr_nums])
@@ -401,7 +599,7 @@ def _build_subtask(row: Dict[str, Any]) -> Optional[Subtask]:
     )
 
 
-def group_roadmap_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
+def group_planning_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
     projects: List[Project] = []
     current: Optional[Project] = None
     legacy_mode: Optional[bool] = None
@@ -417,74 +615,22 @@ def group_roadmap_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
             legacy_mode = _is_legacy_flattened_row(row)
 
         explicit_title = _clean(
-            _find_field(
-                row,
-                [
-                    "project",
-                    "project title",
-                    "project name",
-                    "project_name",
-                    "key goals",
-                    "goal",
-                    "target",
-                ],
-            )
+            _find_field(row, _project_title_fields())
         )
         description = _clean(
-            _find_field(
-                row,
-                [
-                    "project description",
-                    "description",
-                    "project_description",
-                    "impact",
-                ],
-            )
+            _find_field(row, _project_description_fields())
         )
         lead = _clean(
-            _find_field(
-                row,
-                [
-                    "project owner leads",
-                    "project owner lead",
-                    "project_owner_lead",
-                    "owner leads",
-                    "lead",
-                ],
-            )
+            _find_field(row, _lead_fields())
         )
         contributor = _clean(
-            _find_field(
-                row,
-                [
-                    "project owner contributor",
-                    "project_owner_contributor",
-                    "owner contributor",
-                    "contributor",
-                ],
-            )
+            _find_field(row, _contributor_fields())
         )
         planned = _clean(
-            _find_field(
-                row,
-                [
-                    "planned completion date",
-                    "planned completion",
-                    "planned_date",
-                    "planned",
-                ],
-            )
+            _find_field(row, _planned_date_fields())
         )
         debugging = _clean(
-            _find_field(
-                row,
-                [
-                    "link to active debugging doc",
-                    "debugging_doc_link",
-                    "debugging doc",
-                    "debugging link",
-                ],
-            )
+            _find_field(row, _debug_link_fields())
         )
         source_mode = _clean(_find_field(row, ["source_mode"]))
 
@@ -509,8 +655,13 @@ def group_roadmap_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
 
         starts_new_project = False
         if title_is_project_candidate:
+            candidate_project_name = _guess_project_title(explicit_title, description)
+            candidate_project_name_norm = _normalize_key(candidate_project_name)
+            current_project_name_norm = _normalize_key(current.project_name if current else "")
             if current is None:
                 starts_new_project = True
+            elif candidate_project_name_norm and candidate_project_name_norm == current_project_name_norm:
+                starts_new_project = False
             elif legacy_mode:
                 # Legacy flattened snapshot may carry planned dates in subtask
                 # rows, so use stronger project-level anchors for boundaries.
@@ -637,7 +788,7 @@ def group_roadmap_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
 
 
 def normalize_row(raw: Dict[str, Any], fallback_id_prefix: str = "proj") -> Project:
-    grouped = group_roadmap_rows([raw])
+    grouped = group_planning_rows([raw])
     if grouped:
         return grouped[0]
     name = _clean(_find_field(raw, ["project", "project_name", "project name"])) or "-"
@@ -646,3 +797,8 @@ def normalize_row(raw: Dict[str, Any], fallback_id_prefix: str = "proj") -> Proj
         project_name=name or "-",
         raw_project_rows=[raw],
     )
+
+
+def group_roadmap_rows(raw_rows: List[Dict[str, Any]]) -> List[Project]:
+    # Backward-compatible alias.
+    return group_planning_rows(raw_rows)

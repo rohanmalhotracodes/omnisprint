@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .coral_client import CoralClient
-from .normalizer import group_roadmap_rows
+from .normalizer import group_planning_rows
 from .reminder_generator import generate_reminders
 from .risk_engine import score_project
 
@@ -49,7 +49,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 coral = CoralClient()
 
-SNAPSHOT_SCRIPT = ROOT_DIR / "scripts" / "snapshot_google_sheets.sh"
+SNAPSHOT_SCRIPT = ROOT_DIR / "scripts" / "snapshot_planning_source.sh"
 
 SYNC_STATUS: Dict[str, Any] = {
     "status": "IDLE",
@@ -69,9 +69,9 @@ REPORT_CACHE_TTL_SECONDS = int(os.getenv("REPORT_CACHE_TTL_SECONDS", "180"))
 REPORT_CACHE_SCHEMA_VERSION = 2
 REPORT_CACHE_FILE = ROOT_DIR / "backend" / ".cache" / "project_reports_cache.json"
 REPORT_CACHE_SNAPSHOT_FILES = [
-    ROOT_DIR / "coral" / "data" / "oppia_roadmap_snapshot.jsonl",
-    ROOT_DIR / "coral" / "data" / "oppia_roadmap_project_links.jsonl",
-    ROOT_DIR / "coral" / "data" / "oppia_team_snapshot.jsonl",
+    ROOT_DIR / "coral" / "data" / "planning_snapshot.jsonl",
+    ROOT_DIR / "coral" / "data" / "planning_project_links.jsonl",
+    ROOT_DIR / "coral" / "data" / "team_snapshot.jsonl",
     ROOT_DIR / "coral" / "data" / "ci_signals.jsonl",
 ]
 TABLE_EXISTS_CACHE: Dict[str, Tuple[float, bool]] = {}
@@ -109,6 +109,83 @@ def _to_bool(v: Any) -> bool:
         return v
     text = _clean(v).lower()
     return text in ("1", "true", "yes", "on")
+
+
+def _env_str(key: str, default: str = "") -> str:
+    return str(os.getenv(key) or default).strip()
+
+
+def _dedupe_ordered(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for value in values:
+        text = _clean(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _parse_aliases(raw: str) -> List[str]:
+    text = _clean(raw)
+    if not text:
+        return []
+    parts = [p.strip() for p in text.split(",")]
+    return [p for p in parts if p]
+
+
+def _planning_schema_name() -> str:
+    return _env_str("PLANNING_SCHEMA", "planning")
+
+
+def _planning_projects_table_name() -> str:
+    return _env_str("PLANNING_PROJECTS_TABLE", "projects")
+
+
+def _planning_project_links_table_name() -> str:
+    return _env_str("PLANNING_PROJECT_LINKS_TABLE", "project_links")
+
+
+def _team_schema_name() -> str:
+    return _env_str("TEAM_SCHEMA", "team_context")
+
+
+def _team_members_table_name() -> str:
+    return _env_str("TEAM_MEMBERS_TABLE", "members")
+
+
+def _planning_schema_candidates() -> List[str]:
+    aliases = _parse_aliases(_env_str("PLANNING_SCHEMA_ALIASES"))
+    return _dedupe_ordered([_planning_schema_name()] + aliases + ["planning"])
+
+
+def _team_schema_candidates() -> List[str]:
+    aliases = _parse_aliases(_env_str("TEAM_SCHEMA_ALIASES"))
+    return _dedupe_ordered([_team_schema_name()] + aliases + ["team_context"])
+
+
+def _resolve_table_ref(schema_candidates: List[str], table_name: str) -> Tuple[str, str]:
+    for schema in schema_candidates:
+        if _table_exists(schema, table_name):
+            return schema, table_name
+    return schema_candidates[0], table_name
+
+
+def _planning_projects_ref() -> Tuple[str, str]:
+    return _resolve_table_ref(_planning_schema_candidates(), _planning_projects_table_name())
+
+
+def _planning_links_ref() -> Tuple[str, str]:
+    return _resolve_table_ref(_planning_schema_candidates(), _planning_project_links_table_name())
+
+
+def _team_members_ref() -> Tuple[str, str]:
+    return _resolve_table_ref(_team_schema_candidates(), _team_members_table_name())
+
+
+def _qualified_table(schema: str, table: str) -> str:
+    return f"{schema}.{table}"
 
 
 def _parse_dt(s: Any):
@@ -342,13 +419,14 @@ def _table_exists(schema: str, table: Optional[str] = None) -> bool:
         return False
 
 
-def _fetch_roadmap_rows(limit: int = 1000) -> List[Dict[str, Any]]:
+def _fetch_planning_rows(limit: int = 1000) -> List[Dict[str, Any]]:
     if not coral.available():
         raise RuntimeError("Coral CLI not available")
-    q = f"SELECT * FROM oppia_roadmap.projects LIMIT {int(limit)};"
+    planning_schema, planning_table = _planning_projects_ref()
+    q = f"SELECT * FROM {_qualified_table(planning_schema, planning_table)} LIMIT {int(limit)};"
     rows = coral.run_sql(q, timeout=12)
     if not isinstance(rows, list):
-        raise RuntimeError("Coral roadmap query did not return row list")
+        raise RuntimeError("Coral planning query did not return row list")
     return rows
 
 
@@ -409,9 +487,12 @@ def _fetch_live_github_maps(
     elif owner_clause:
         prefix_clause = f"{owner_clause} AND "
 
+    planning_links_schema, planning_links_table = _planning_links_ref()
+    planning_links_q = _qualified_table(planning_links_schema, planning_links_table)
+
     # Preferred path: perform cross-source joins in Coral SQL via project_links.
     used_join_path = False
-    if _table_exists("oppia_roadmap", "project_links"):
+    if _table_exists(planning_links_schema, planning_links_table):
         owner_repo_issue_join = ""
         owner_repo_pr_join = ""
         if gh_owner:
@@ -426,12 +507,12 @@ def _fetch_live_github_maps(
             issue_link_filter = f" AND pl.link_number IN ({issue_in_clause})"
             issue_join_variants = [
                 "SELECT pl.link_number AS link_number, i.number, i.title, i.state, i.labels, i.updated_at, i.html_url, i.body "
-                "FROM oppia_roadmap.project_links pl "
+                f"FROM {planning_links_q} pl "
                 f"LEFT JOIN github.issues i ON i.number = pl.link_number{owner_repo_issue_join} "
                 "WHERE pl.link_type = 'issue' "
                 f"{issue_link_filter};",
                 "SELECT pl.link_number AS link_number, i.number, i.title, i.state, i.labels, i.updated_at, i.html_url "
-                "FROM oppia_roadmap.project_links pl "
+                f"FROM {planning_links_q} pl "
                 f"LEFT JOIN github.issues i ON i.number = pl.link_number{owner_repo_issue_join} "
                 "WHERE pl.link_type = 'issue' "
                 f"{issue_link_filter};",
@@ -454,12 +535,12 @@ def _fetch_live_github_maps(
             pr_link_filter = f" AND pl.link_number IN ({pr_in_clause})"
             pr_join_variants = [
                 "SELECT pl.link_number AS link_number, p.number, p.title, p.state, p.updated_at, p.draft, p.html_url, p.merged_at "
-                "FROM oppia_roadmap.project_links pl "
+                f"FROM {planning_links_q} pl "
                 f"LEFT JOIN github.pulls p ON p.number = pl.link_number{owner_repo_pr_join} "
                 "WHERE pl.link_type = 'pr' "
                 f"{pr_link_filter};",
                 "SELECT pl.link_number AS link_number, p.number, p.title, p.state, p.updated_at, p.draft, p.html_url "
-                "FROM oppia_roadmap.project_links pl "
+                f"FROM {planning_links_q} pl "
                 f"LEFT JOIN github.pulls p ON p.number = pl.link_number{owner_repo_pr_join} "
                 "WHERE pl.link_type = 'pr' "
                 f"{pr_link_filter};",
@@ -527,11 +608,14 @@ def _fetch_ci_signals_map(all_pr_nums: List[int]) -> Tuple[Dict[int, Dict[str, A
     if not all_pr_nums or not coral.available() or not _table_exists("ci", "signals"):
         return ci_map, queries
 
-    if _table_exists("oppia_roadmap", "project_links"):
+    planning_links_schema, planning_links_table = _planning_links_ref()
+    planning_links_q = _qualified_table(planning_links_schema, planning_links_table)
+
+    if _table_exists(planning_links_schema, planning_links_table):
         in_clause = ",".join(str(int(x)) for x in sorted(set(all_pr_nums)))
         join_query = (
             "SELECT DISTINCT pl.link_number AS pr_number, c.ci_status, c.failed_tests, c.flaky_tests, c.last_run "
-            "FROM oppia_roadmap.project_links pl "
+            f"FROM {planning_links_q} pl "
             "LEFT JOIN ci.signals c ON c.pr_number = pl.link_number "
             "WHERE pl.link_type = 'pr' "
             f"AND pl.link_number IN ({in_clause});"
@@ -566,6 +650,51 @@ def _fetch_ci_signals_map(all_pr_nums: List[int]) -> Tuple[Dict[int, Dict[str, A
     return ci_map, queries
 
 
+def _augment_projects_with_planning_links(projects: List[Any]) -> None:
+    if not projects or not coral.available():
+        return
+
+    planning_links_schema, planning_links_table = _planning_links_ref()
+    if not _table_exists(planning_links_schema, planning_links_table):
+        return
+
+    planning_links_q = _qualified_table(planning_links_schema, planning_links_table)
+    variants = [
+        f"SELECT project_id, link_type, link_number FROM {planning_links_q};",
+        f"SELECT project_id, type AS link_type, number AS link_number FROM {planning_links_q};",
+    ]
+    try:
+        rows, _ = _run_sql_variants(variants, timeout=6)
+    except Exception:
+        return
+    if not rows:
+        return
+
+    issue_by_project: Dict[str, set[int]] = defaultdict(set)
+    pr_by_project: Dict[str, set[int]] = defaultdict(set)
+    for row in rows:
+        project_id = _clean(row.get("project_id"))
+        link_type = _clean(row.get("link_type")).lower()
+        link_number = _to_int(row.get("link_number") or row.get("number"))
+        if not project_id or link_number <= 0:
+            continue
+        if link_type == "issue":
+            issue_by_project[project_id].add(link_number)
+        elif link_type == "pr":
+            pr_by_project[project_id].add(link_number)
+
+    for project in projects:
+        pid = _clean(getattr(project, "project_id", ""))
+        if not pid:
+            continue
+        current_issue_nums = {_to_int(n) for n in (getattr(project, "all_github_issue_numbers", None) or []) if _to_int(n) > 0}
+        current_pr_nums = {_to_int(n) for n in (getattr(project, "all_github_pr_numbers", None) or []) if _to_int(n) > 0}
+        current_issue_nums.update(issue_by_project.get(pid, set()))
+        current_pr_nums.update(pr_by_project.get(pid, set()))
+        project.all_github_issue_numbers = sorted(current_issue_nums)
+        project.all_github_pr_numbers = sorted(current_pr_nums)
+
+
 def _is_valid_email(val: str) -> bool:
     text = _clean(val)
     return "@" in text and "." in text and " " not in text
@@ -578,11 +707,11 @@ def _fetch_contributor_email_map() -> Tuple[Dict[str, str], List[str]]:
     if not coral.available():
         return contributor_email_map, queries
 
+    member_table = _team_members_table_name()
     candidate_tables: List[str] = []
-    if _table_exists("oppia_team", "members"):
-        candidate_tables.append("oppia_team.members")
-    if _table_exists("team_context", "members"):
-        candidate_tables.append("team_context.members")
+    for schema in _team_schema_candidates():
+        if _table_exists(schema, member_table):
+            candidate_tables.append(_qualified_table(schema, member_table))
 
     for table_name in candidate_tables:
         variants = [
@@ -634,9 +763,39 @@ def _fetch_contributor_email_map() -> Tuple[Dict[str, str], List[str]]:
 
 
 def _repo_slug() -> str:
-    owner = (os.getenv("GITHUB_OWNER") or os.getenv("GITHUB_REPO_OWNER") or "oppia").strip()
-    repo = (os.getenv("GITHUB_REPO") or "oppia").strip()
+    owner = (os.getenv("GITHUB_OWNER") or os.getenv("GITHUB_REPO_OWNER") or "your-org").strip()
+    repo = (os.getenv("GITHUB_REPO") or "your-repo").strip()
     return f"{owner}/{repo}"
+
+
+def _workspace_org_name() -> str:
+    explicit = _clean(os.getenv("WORKSPACE_ORG_NAME") or os.getenv("WORKSPACE_NAME"))
+    if explicit:
+        return explicit
+    owner = _clean(os.getenv("GITHUB_OWNER") or os.getenv("GITHUB_REPO_OWNER"))
+    if owner:
+        normalized = owner.replace("-", " ").replace("_", " ").strip()
+        return normalized.title() if normalized else owner
+    return "Your Org"
+
+
+def _planning_source_label() -> str:
+    return _clean(os.getenv("PLANNING_SOURCE_LABEL")) or "Planning sheet"
+
+
+def _planning_source_display_name() -> str:
+    return _clean(os.getenv("PLANNING_SOURCE_DISPLAY_NAME")) or _planning_source_label()
+
+
+def _engineering_source_label() -> str:
+    configured = _clean(os.getenv("ENGINEERING_SOURCE_LABEL"))
+    if configured:
+        return configured
+    return f"{_repo_slug()} GitHub"
+
+
+def _team_source_label() -> str:
+    return _clean(os.getenv("TEAM_SOURCE_LABEL")) or "Contributor directory"
 
 
 def _issue_url(number: int) -> str:
@@ -951,9 +1110,10 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
         if payload and _disk_cache_is_valid(payload, limit, source_fingerprint):
             return _hydrate_memory_cache_from_disk(payload)
 
-    rows = _fetch_roadmap_rows(limit)
-    _enforce_build_deadline(build_started, "roadmap query")
-    projects = group_roadmap_rows(rows)
+    rows = _fetch_planning_rows(limit)
+    _enforce_build_deadline(build_started, "planning query")
+    projects = group_planning_rows(rows)
+    _augment_projects_with_planning_links(projects)
 
     if not projects:
         generated_at = _utc_now()
@@ -1233,12 +1393,12 @@ def _build_project_reports(limit: int = 1000, force_refresh: bool = False) -> Li
                 "Coral retrieves planning sheet rows.",
                 "Backend groups rows into projects.",
                 "Backend extracts GitHub issue/PR numbers.",
-                "Coral joins oppia_roadmap.project_links with github.issues/github.pulls when available.",
+                "Coral joins planning.project_links with github.issues/github.pulls when available.",
                 "Backend links issue/PR evidence to subtasks.",
                 "Backend applies CI/test-failure signals and scores project risk.",
                 "Reminder generator creates Google Chat text only for high-risk projects.",
             ],
-            "queries": ["SELECT * FROM oppia_roadmap.projects;"] + coral_queries,
+            "queries": ["SELECT * FROM planning.projects;"] + coral_queries,
         }
 
         report_dict: Dict[str, Any] = {
@@ -1353,7 +1513,7 @@ def _run_snapshot_sync() -> Tuple[str, str]:
     if proc.returncode != 0:
         raise RuntimeError(combined or f"Snapshot sync failed with exit code {proc.returncode}")
 
-    if "OPPIA_ROADMAP_CSV_URL not set" in combined:
+    if "PLANNING_CSV_URL not set" in combined:
         return "NOT_CONFIGURED", combined
 
     return "SYNCED", combined or "Snapshot sync completed"
@@ -1361,42 +1521,51 @@ def _run_snapshot_sync() -> Tuple[str, str]:
 
 @app.get("/api/health")
 def health():
+    workspace_name = _workspace_org_name()
+    target_repo = _repo_slug()
+    planning_source = _planning_source_label()
+    planning_display = _planning_source_display_name()
+    engineering_source = _engineering_source_label()
+    team_source = _team_source_label()
+    planning_schema, planning_table = _planning_projects_ref()
+    team_schema, team_table = _team_members_ref()
+    planning_table_ref = _qualified_table(planning_schema, planning_table)
+    team_table_ref = _qualified_table(team_schema, team_table)
+
     if not coral.available():
         return {
             "product": "OmniSprint",
             "mode": "NOT_READY",
             "backend": "ok",
             "coral": "missing",
-            "demo_workspace": "Oppia",
-            "target_repo": "oppia/oppia",
-            "planning_source": "Public quarterly targets sheet",
-            "engineering_source": "oppia/oppia GitHub",
-            "demo_planning_source": "Oppia Quarterly Targets Sheet",
-            "demo_engineering_source": "oppia/oppia GitHub",
+            "workspace": workspace_name,
+            "target_repo": target_repo,
+            "planning_source": planning_source,
+            "engineering_source": engineering_source,
             "connected_sources_count": 0,
             "sources": [],
         }
 
-    roadmap_present = _table_exists("oppia_roadmap", "projects")
+    planning_present = _table_exists(planning_schema, planning_table)
     issues_present = _table_exists("github", "issues")
     pulls_present = _table_exists("github", "pulls")
     actions_present = _table_exists("ci", "signals")
-    team_present = _table_exists("oppia_team", "members") or _table_exists("team_context", "members")
+    team_present = _table_exists(team_schema, team_table)
 
-    if roadmap_present and issues_present and pulls_present:
+    if planning_present and issues_present and pulls_present:
         mode = "LIVE"
-    elif roadmap_present and (issues_present or pulls_present):
+    elif planning_present and (issues_present or pulls_present):
         mode = "HYBRID"
-    elif roadmap_present:
+    elif planning_present:
         mode = "HYBRID"
     else:
         mode = "NOT_READY"
 
     sources = [
-        {"name": "Oppia Quarterly Targets Sheet", "table": "oppia_roadmap.projects", "status": "connected" if roadmap_present else "missing"},
-        {"name": "Live GitHub Issues", "table": "github.issues", "status": "connected" if issues_present else "missing"},
-        {"name": "Live GitHub PRs", "table": "github.pulls", "status": "connected" if pulls_present else "missing"},
-        {"name": "Contributor Directory", "table": "oppia_team.members", "status": "connected" if team_present else "missing"},
+        {"name": planning_display, "table": planning_table_ref, "status": "connected" if planning_present else "missing"},
+        {"name": "GitHub Issues", "table": "github.issues", "status": "connected" if issues_present else "missing"},
+        {"name": "GitHub PRs", "table": "github.pulls", "status": "connected" if pulls_present else "missing"},
+        {"name": team_source, "table": team_table_ref, "status": "connected" if team_present else "missing"},
     ]
     if actions_present:
         sources.append({"name": "GitHub Actions", "table": "ci.signals", "status": "connected"})
@@ -1405,14 +1574,12 @@ def health():
     return {
         "product": "OmniSprint",
         "mode": mode,
-        "demo_workspace": "Oppia",
-        "planning_source": "Public quarterly targets sheet",
-        "engineering_source": "oppia/oppia GitHub",
-        "demo_planning_source": "Oppia Quarterly Targets Sheet",
-        "demo_engineering_source": "oppia/oppia GitHub",
+        "workspace": workspace_name,
+        "planning_source": planning_source,
+        "engineering_source": engineering_source,
         "backend": "ok",
         "coral": "ok",
-        "target_repo": "oppia/oppia",
+        "target_repo": target_repo,
         "connected_sources_count": connected_sources_count,
         "sources": sources,
     }
@@ -1463,8 +1630,7 @@ def get_cache_status(limit: int = 1200):
     }
 
 
-@app.post("/api/sync-roadmap")
-def post_sync_roadmap():
+def _sync_planning_source():
     try:
         status, message = _run_snapshot_sync()
         SYNC_STATUS["status"] = status
@@ -1478,6 +1644,17 @@ def post_sync_roadmap():
         SYNC_STATUS["message"] = "Snapshot sync failed"
         SYNC_STATUS["last_error"] = str(e)
         raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/sync-planning")
+def post_sync_planning():
+    return _sync_planning_source()
+
+
+@app.post("/api/sync-roadmap")
+def post_sync_roadmap_alias():
+    # Backward-compatible alias.
+    return _sync_planning_source()
 
 
 @app.get("/api/projects")

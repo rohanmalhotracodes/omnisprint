@@ -116,15 +116,21 @@ if command -v coral >/dev/null 2>&1; then
     fi
   }
 
-  check_schema oppia_roadmap projects "oppia_roadmap.projects (roadmap)"
-  check_schema oppia_roadmap project_links "oppia_roadmap.project_links (roadmap link index)"
+  planning_schema="${PLANNING_SCHEMA:-planning}"
+  planning_projects_table="${PLANNING_PROJECTS_TABLE:-projects}"
+  planning_links_table="${PLANNING_PROJECT_LINKS_TABLE:-project_links}"
+  team_schema="${TEAM_SCHEMA:-team_context}"
+  team_members_table="${TEAM_MEMBERS_TABLE:-members}"
+
+  check_schema "$planning_schema" "$planning_projects_table" "$planning_schema.$planning_projects_table (planning)"
+  check_schema "$planning_schema" "$planning_links_table" "$planning_schema.$planning_links_table (planning link index)"
   check_schema github issues "github.issues (GitHub issues)"
   check_schema github pulls "github.pulls (GitHub pulls)"
-  team_out=$(coral sql "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = 'oppia_team' AND table_name = 'members' LIMIT 1;" 2>/dev/null || true)
-  if echo "$team_out" | grep -qi "oppia_team"; then
-    echo "OK: oppia_team.members (contributor directory) available"
+  team_out=$(coral sql "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = '$team_schema' AND table_name = '$team_members_table' LIMIT 1;" 2>/dev/null || true)
+  if echo "$team_out" | grep -qi "$team_schema"; then
+    echo "OK: $team_schema.$team_members_table (contributor directory) available"
   else
-    echo "INFO: oppia_team.members not available (email draft enrichment will be limited)"
+    echo "INFO: $team_schema.$team_members_table not available (email draft enrichment will be limited)"
   fi
 
   # Optional: GitHub Actions/CI signals

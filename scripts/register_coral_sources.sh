@@ -33,12 +33,17 @@ register() {
   spec="$1"
   [ -f "$spec" ] || return 0
   echo "Attempting to add source from $spec"
+  data_dir="file://$ROOT_DIR/coral/data/"
+  rendered_spec="$(mktemp -t omnisprint_coral_spec_XXXX.yaml)"
+  sed "s|__DATA_DIR__|$data_dir|g" "$spec" > "$rendered_spec"
   # Show errors but don't exit the script
-  if coral source add --file "$spec" 2>&1; then
+  if coral source add --file "$rendered_spec" 2>&1; then
     echo "Registered source: $spec"
+    rm -f "$rendered_spec"
     return 0
   else
     echo "Failed to register $spec (continuing)"
+    rm -f "$rendered_spec"
     return 1
   fi
 }
@@ -55,8 +60,8 @@ else
 fi
 
 # Register only required sources for OmniSprint.
-register "$ROOT_DIR/coral/sources/oppia_roadmap_sheet.yaml" || true
-register "$ROOT_DIR/coral/sources/oppia_team_sheet.yaml" || true
+register "$ROOT_DIR/coral/sources/planning_sheet.yaml" || true
+register "$ROOT_DIR/coral/sources/team_directory.yaml" || true
 
 # Optional source: GitHub Actions/CI signals (shown only when available).
 register "$ROOT_DIR/coral/sources/ci_signals.yaml" || true

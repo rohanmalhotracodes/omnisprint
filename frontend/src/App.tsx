@@ -7,7 +7,7 @@ import {
   fetchOwners,
   fetchProjects,
   generateReminders,
-  syncRoadmap,
+  syncPlanning,
   type AgentAskResponse,
   type HealthResponse,
   type LeadOwnerRisk,
@@ -70,8 +70,10 @@ const SUGGESTED_PROMPTS = [
   'Show technical evidence for Coral retrieval.',
 ]
 
-const CORE_CACHE_KEY = 'omnisprint_core_cache_v1'
+const CORE_CACHE_KEY = 'omnisprint_core_cache_v2'
 const CORE_CACHE_TTL_MS = 15 * 60 * 1000
+const ISSUE_NUMBER_RE = /github\.com\/[^/\s]+\/[^/\s]+\/issues\/(\d+)/gi
+const PR_NUMBER_RE = /github\.com\/[^/\s]+\/[^/\s]+\/pull\/(?:s\/)?(\d+)/gi
 
 function parseDateValue(value?: string | null): Date | null {
   if (!value) return null
@@ -164,7 +166,16 @@ function normalizeAgentReminder(reminder: any): Reminder | null {
 }
 
 function repoSlug(health: HealthResponse | null): string {
-  return (health?.target_repo || 'oppia/oppia').trim() || 'oppia/oppia'
+  return (health?.target_repo || 'your-org/your-repo').trim() || 'your-org/your-repo'
+}
+
+function workspaceName(health: HealthResponse | null): string {
+  const explicit = (health?.workspace || '').trim()
+  if (explicit) return explicit
+  const slug = repoSlug(health)
+  const owner = (slug.split('/')[0] || '').trim()
+  if (!owner) return 'Your Org'
+  return owner.replace(/[-_]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
 }
 
 function fallbackIssueUrl(slug: string, number: number): string {
@@ -173,6 +184,30 @@ function fallbackIssueUrl(slug: string, number: number): string {
 
 function fallbackPrUrl(slug: string, number: number): string {
   return `https://github.com/${slug}/pull/${number}`
+}
+
+function extractGithubNumbers(text?: string | null): { issueNumbers: number[]; prNumbers: number[] } {
+  const raw = String(text || '')
+  const issueNumbers = new Set<number>()
+  const prNumbers = new Set<number>()
+
+  let match: RegExpExecArray | null
+  ISSUE_NUMBER_RE.lastIndex = 0
+  PR_NUMBER_RE.lastIndex = 0
+
+  while ((match = ISSUE_NUMBER_RE.exec(raw)) !== null) {
+    const num = Number(match[1])
+    if (Number.isFinite(num) && num > 0) issueNumbers.add(num)
+  }
+  while ((match = PR_NUMBER_RE.exec(raw)) !== null) {
+    const num = Number(match[1])
+    if (Number.isFinite(num) && num > 0) prNumbers.add(num)
+  }
+
+  return {
+    issueNumbers: Array.from(issueNumbers).sort((a, b) => a - b),
+    prNumbers: Array.from(prNumbers).sort((a, b) => a - b),
+  }
 }
 
 function reminderCardId(projectId: string): string {
@@ -435,6 +470,14 @@ export default function App() {
     el.scrollTop = el.scrollHeight
   }, [activeNav, chatMessages, chatLoading])
 
+  useEffect(() => {
+    if (!selectedProject) return
+    const refreshed = projects.find((project) => project.project_id === selectedProject.project_id)
+    if (refreshed && refreshed !== selectedProject) {
+      setSelectedProject(refreshed)
+    }
+  }, [projects, selectedProject])
+
   const markReminderCopied = useCallback((key: string) => {
     setCopiedReminderIds((prev) => {
       const next = new Set(prev)
@@ -664,7 +707,7 @@ export default function App() {
     if (coreRefreshing) return
 
     try {
-      const syncResult = await syncRoadmap()
+      const syncResult = await syncPlanning()
       if (syncResult?.status) {
         pushToast(`Refresh complete (${syncResult.status})`, 'success')
       } else {
@@ -1818,7 +1861,7 @@ export default function App() {
               </div>
             </div>
             <div className="topbar-meta">
-              <span className="meta-pill">Workspace: Oppia</span>
+              <span className="meta-pill">Workspace: {workspaceName(health)}</span>
               <span className="meta-pill">Last synced: {lastSynced}</span>
               <Button variant="secondary" onClick={() => void handleRefresh()} loading={coreRefreshing}>
                 Refresh
@@ -1949,13 +1992,22 @@ export default function App() {
                       </thead>
                       <tbody>
                         {selectedProject.subtasks.map((subtask, idx) => {
-                          const issueNums = subtask.github_issue_numbers || []
+                          const parsed = extractGithubNumbers(
+                            `${subtask.subtask || ''}\n${subtask.notes || ''}`,
+                          )
+                          const issueNums = Array.from(
+                            new Set([
+                              ...(subtask.github_issue_numbers || []),
+                              ...parsed.issueNumbers,
+                            ]),
+                          ).sort((a, b) => a - b)
                           const prNums = Array.from(
                             new Set([
                               ...(subtask.github_pr_numbers || []),
                               ...(subtask.derived_related_pr_numbers || []),
+                              ...parsed.prNumbers,
                             ]),
-                          )
+                          ).sort((a, b) => a - b)
                           return (
                             <tr key={`${selectedProject.project_id}-subtask-${idx}`}>
                             <td>

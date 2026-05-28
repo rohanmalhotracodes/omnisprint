@@ -8,7 +8,7 @@ tables:
   - name: signals
     description: CI signals snapshot
     source:
-      location: file:///Users/rohanmalhotra/Desktop/Hack/oppia-roadmap-risk-oracle/coral/data/
+      location: __DATA_DIR__
       glob: "ci_signals.jsonl"
     columns:
       - name: pr_number

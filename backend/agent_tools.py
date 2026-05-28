@@ -6,7 +6,7 @@ from urllib.parse import quote
 from .reminder_generator import generate_reminders
 
 
-PROJECT_CORAL_SOURCES = ["oppia_roadmap.projects", "github.issues", "github.pulls"]
+PROJECT_CORAL_SOURCES = ["planning.projects", "github.issues", "github.pulls"]
 
 
 def _get_main():
@@ -42,8 +42,8 @@ def _parse_dt(value: Any) -> Optional[datetime]:
 
 
 def _repo_slug() -> str:
-    owner = _clean(os.getenv("GITHUB_OWNER")) or "oppia"
-    repo = _clean(os.getenv("GITHUB_REPO")) or "oppia"
+    owner = _clean(os.getenv("GITHUB_OWNER")) or "your-org"
+    repo = _clean(os.getenv("GITHUB_REPO")) or "your-repo"
     return f"{owner}/{repo}"
 
 
@@ -872,7 +872,7 @@ def find_possible_regression_sources(
                     "number_or_sha": pr_num,
                     "title_or_message": _clean(pr.get("title")) or f"PR #{pr_num}",
                     "url": _clean(pr.get("html_url")) or f"https://github.com/{_repo_slug()}/pull/{pr_num}",
-                    "reason": "recent open PR near active roadmap work (correlation, not proven causality)",
+                    "reason": "recent open PR near active planning work (correlation, not proven causality)",
                     "confidence": "LOW",
                 }
             )
@@ -1038,7 +1038,7 @@ def get_latest_activity_summary(limit: int = 10) -> Dict[str, Any]:
         if open_issues:
             recommended_actions.append(f"Triage {len(open_issues)} recently updated open issues")
     if commits.get("status") == "success" and commit_rows:
-        recommended_actions.append("Check recent commits for changes touching blocked or high-risk roadmap projects")
+        recommended_actions.append("Check recent commits for changes touching blocked or high-risk projects")
 
     latest_pr_brief = ""
     gemini_brief_used = False
@@ -1105,7 +1105,7 @@ def get_technical_evidence(include_queries: bool = True) -> Dict[str, Any]:
 
     if not query_steps:
         query_steps = [
-            "Coral retrieves planning rows from oppia_roadmap.projects.",
+            "Coral retrieves planning rows from planning.projects.",
             "Backend groups rows into projects and extracts GitHub links.",
             "Coral retrieves GitHub evidence from github.issues/github.pulls.",
             "Backend scores risk and generates follow-up actions.",
