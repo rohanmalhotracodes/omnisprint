@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="assets/omnisprint-logo.png" alt="OmniSprint Logo" width="160" />
+  <img width="1024" height="1024" alt="omnisprint_social_1024x1024" src="https://github.com/user-attachments/assets/ba2010e4-cad3-4b59-9bd6-b3b51cab847a" />
+
+
 </p>
 
 # OmniSprint
