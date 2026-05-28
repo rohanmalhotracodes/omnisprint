@@ -1,3 +1,11 @@
+---
+title: OmniSprint
+sdk: docker
+pinned: false
+license: mit
+short_description: Coral-powered sprint intelligence for software teams
+---
+
 <p align="center">
   <img src="assets/omnisprint-logo.png" alt="OmniSprint Logo" width="160" />
 </p>
