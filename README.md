@@ -1,3 +1,13 @@
+---
+title: OmniSprint
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 <p align="center">
   <img src="assets/omnisprint-logo.png" alt="OmniSprint Logo" width="160" />
 </p>
@@ -28,6 +38,7 @@ OmniSprint connects planning sheets with GitHub issues, pull requests, and CI si
 - [Screenshots](#screenshots)
 - [Tech Stack](#tech-stack)
 - [Setup](#setup)
+- [Deploying to Hugging Face Spaces](#deploying-to-hugging-face-spaces)
 - [Environment Variables](#environment-variables)
 - [API Endpoints](#api-endpoints)
 - [Custom Coral Source Specs](#custom-coral-source-specs)
@@ -217,6 +228,47 @@ make demo
 - Never commit `.env`.
 - Keep `.env.example` secret-free.
 
+## Deploying to Hugging Face Spaces
+
+OmniSprint should be deployed as a **Docker Space** because it requires FastAPI, React, Coral CLI, and source-registration scripts.
+
+1. Go to `https://huggingface.co/spaces`.
+2. Create a new Space.
+3. Name: `omnisprint`.
+4. SDK: `Docker`.
+5. Visibility: Public or Private.
+6. Push this repository to the Space remote.
+7. Add Hugging Face Space Secrets:
+`GITHUB_TOKEN`
+`GEMINI_API_KEY` (optional)
+8. Add Hugging Face Space Variables:
+`GITHUB_OWNER=oppia`
+`GITHUB_REPO=oppia`
+`GEMINI_MODEL=gemini-2.5-flash`
+`WORKSPACE_ORG_NAME=Oppia Demo`
+`PLANNING_CSV_URL=<public planning csv>`
+9. Wait for Docker build + startup.
+10. Open the Space URL.
+
+Local Docker test:
+
+```bash
+docker build -t omnisprint .
+docker run --rm -p 7860:7860 \
+  -e GITHUB_TOKEN=... \
+  -e GITHUB_OWNER=oppia \
+  -e GITHUB_REPO=oppia \
+  -e GEMINI_API_KEY=... \
+  -e PORT=7860 \
+  omnisprint
+```
+
+Open:
+
+```text
+http://localhost:7860
+```
+
 ## Environment Variables
 
 Current primary variables used by OmniSprint:
@@ -237,6 +289,7 @@ PLANNING_PROJECTS_TABLE=projects
 PLANNING_PROJECT_LINKS_TABLE=project_links
 TEAM_SCHEMA=team_context
 TEAM_MEMBERS_TABLE=members
+PORT=7860
 BACKEND_PORT=8000
 FRONTEND_PORT=5173
 GEMINI_API_KEY=
@@ -244,10 +297,6 @@ GEMINI_MODEL=gemini-2.5-flash
 OMNISPRINT_AGENT_MAX_TOOL_CALLS=5
 GITHUB_MATCH_TARGET_REPO_ONLY=0
 ```
-
-### Legacy Demo Naming Note
-
-If you previously used `OPPIA_ROADMAP_CSV_URL`, migrate that value to `PLANNING_CSV_URL`.
 
 ## API Endpoints
 
