@@ -28,6 +28,26 @@ load_env_file() {
 
 load_env_file "$ROOT_DIR/.env"
 
+# Backward-compatible env aliases from older demos.
+if [ -z "${PLANNING_CSV_URL-}" ] && [ -n "${OPPIA_ROADMAP_CSV_URL-}" ]; then
+  PLANNING_CSV_URL="${OPPIA_ROADMAP_CSV_URL}"
+fi
+if [ -z "${PLANNING_SHEET_ID-}" ] && [ -n "${OPPIA_ROADMAP_SHEET_ID-}" ]; then
+  PLANNING_SHEET_ID="${OPPIA_ROADMAP_SHEET_ID}"
+fi
+if [ -z "${PLANNING_GID-}" ] && [ -n "${OPPIA_ROADMAP_GID-}" ]; then
+  PLANNING_GID="${OPPIA_ROADMAP_GID}"
+fi
+if [ -z "${TEAM_CSV_URL-}" ] && [ -n "${OPPIA_TEAM_CSV_URL-}" ]; then
+  TEAM_CSV_URL="${OPPIA_TEAM_CSV_URL}"
+fi
+if [ -z "${TEAM_SHEET_ID-}" ] && [ -n "${OPPIA_TEAM_SHEET_ID-}" ]; then
+  TEAM_SHEET_ID="${OPPIA_TEAM_SHEET_ID}"
+fi
+if [ -z "${TEAM_GID-}" ] && [ -n "${OPPIA_TEAM_GID-}" ]; then
+  TEAM_GID="${OPPIA_TEAM_GID}"
+fi
+
 # Fallback URLs from sheet ID + gid when direct CSV URLs are not provided.
 if [ -z "${PLANNING_CSV_URL-}" ] && [ -n "${PLANNING_SHEET_ID-}" ] && [ -n "${PLANNING_GID-}" ]; then
   PLANNING_CSV_URL="https://docs.google.com/spreadsheets/d/${PLANNING_SHEET_ID}/export?format=csv&gid=${PLANNING_GID}"
@@ -48,7 +68,7 @@ else
 fi
 
 if [ -z "${PLANNING_CSV_URL-}" ]; then
-  echo "PLANNING_CSV_URL not set. Skipping planning snapshot refresh to avoid overwriting existing data."
+  echo "PLANNING_CSV_URL not set. Skipping planning snapshot refresh."
 else
   echo "Downloading planning snapshot..."
   curl -sfL "$PLANNING_CSV_URL" -o "$CSV_PATH" || { echo "Failed to download planning snapshot"; exit 1; }
