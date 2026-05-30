@@ -3,7 +3,6 @@
 
 </p>
 
-# OmniSprint
 
 <p align="center"><strong>Coral-powered sprint intelligence for software teams.</strong></p>
 
