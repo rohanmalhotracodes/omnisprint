@@ -1,12 +1,13 @@
 name: team_context
 version: 0.1.0
 dsl_version: 3
-backend: jsonl
+backend: file
 test_queries:
   - SELECT * FROM team_context.members LIMIT 1
 tables:
   - name: members
     description: Contributor directory snapshot (name/email/team/role)
+    format: jsonl
     source:
       location: __DATA_DIR__
       glob: "team_snapshot.jsonl"

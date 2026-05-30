@@ -1,12 +1,13 @@
 name: planning
 version: 0.1.0
 dsl_version: 3
-backend: jsonl
+backend: file
 test_queries:
   - SELECT * FROM planning.projects LIMIT 1
 tables:
   - name: projects
     description: Planning projects snapshot
+    format: jsonl
     source:
       location: __DATA_DIR__
       glob: "planning_snapshot.jsonl"
@@ -41,6 +42,7 @@ tables:
         type: Utf8
   - name: project_links
     description: Flattened project-to-engineering-link rows for cross-source joins
+    format: jsonl
     source:
       location: __DATA_DIR__
       glob: "planning_project_links.jsonl"
