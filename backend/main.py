@@ -1840,6 +1840,18 @@ def agent_query(payload: dict):
 async def serve_react_app(full_path: str):
     if full_path.startswith("api"):
         raise HTTPException(status_code=404, detail="API route not found")
+
+    requested = (full_path or "").lstrip("/")
+    if requested:
+        dist_root = FRONTEND_DIST.resolve()
+        candidate = (FRONTEND_DIST / requested).resolve()
+        try:
+            candidate.relative_to(dist_root)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Invalid path")
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():
         return FileResponse(index_file)

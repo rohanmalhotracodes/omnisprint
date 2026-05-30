@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from .agent_tools import TOOL_REGISTRY
@@ -75,6 +76,14 @@ def _error_text(exc: Exception) -> str:
     return _clean(str(exc))[:800]
 
 
+def _resolve_gemini_api_key() -> str:
+    for key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GENAI_API_KEY", "GOOGLE_GENAI_API_KEY"):
+        value = _clean(os.getenv(key))
+        if value:
+            return value
+    return ""
+
+
 def _strip_internal_project_ids(text: Any) -> str:
     value = _clean(text)
     if not value:
@@ -143,6 +152,29 @@ def _is_model_not_supported_error(exc: Exception) -> bool:
         or "404" in text and "model" in text
         or "unknown model" in text
     )
+
+
+def _is_quota_or_rate_error(exc: Exception) -> bool:
+    text = _error_text(exc).lower()
+    return (
+        "resource_exhausted" in text
+        or "429" in text
+        or "rate limit" in text
+        or "quota" in text
+        or "too many requests" in text
+    )
+
+
+def _call_gemini_with_retry(client: Any, model: str, contents: List[Any], config: Any) -> Any:
+    attempts = 3
+    for attempt in range(attempts):
+        try:
+            return client.models.generate_content(model=model, contents=contents, config=config)
+        except Exception as e:
+            if attempt < attempts - 1 and _is_quota_or_rate_error(e):
+                time.sleep(1.0 + attempt)
+                continue
+            raise
 
 
 def _fallback_used_response(
@@ -611,7 +643,7 @@ def _try_gemini_function_calling(question: str) -> Dict[str, Any]:
     except Exception as e:
         raise RuntimeError(f"Gemini SDK import failed: {e}")
 
-    api_key = _clean(os.getenv("GEMINI_API_KEY"))
+    api_key = _resolve_gemini_api_key()
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
 
@@ -650,37 +682,24 @@ def _try_gemini_function_calling(question: str) -> Dict[str, Any]:
         selected_model = candidate_models[0]
 
     for _ in range(max_calls):
-        try:
-            resp = client.models.generate_content(model=selected_model, contents=contents, config=config)
-        except Exception as e:
-            if not _is_model_not_supported_error(e):
-                raise RuntimeError(
-                    f"Gemini request failed before tool-calling ({selected_model}): {_error_text(e)}"
-                )
-
-            switched = False
-            errors: List[str] = [f"{selected_model}: {_error_text(e)}"]
-            for candidate_model in candidate_models:
-                if candidate_model == selected_model:
+        errors: List[str] = []
+        resp = None
+        candidate_order = [selected_model] + [m for m in candidate_models if m != selected_model]
+        for candidate_model in candidate_order:
+            try:
+                resp = _call_gemini_with_retry(client, candidate_model, contents, config)
+                selected_model = candidate_model
+                _RESOLVED_GEMINI_MODEL = candidate_model
+                break
+            except Exception as e:
+                errors.append(f"{candidate_model}: {_error_text(e)}")
+                if _is_model_not_supported_error(e) or _is_quota_or_rate_error(e):
                     continue
-                try:
-                    resp = client.models.generate_content(model=candidate_model, contents=contents, config=config)
-                    selected_model = candidate_model
-                    _RESOLVED_GEMINI_MODEL = candidate_model
-                    switched = True
-                    break
-                except Exception as inner:
-                    errors.append(f"{candidate_model}: {_error_text(inner)}")
-                    if not _is_model_not_supported_error(inner):
-                        raise RuntimeError(
-                            f"Gemini request failed before tool-calling ({candidate_model}): {_error_text(inner)}"
-                        )
-            if not switched:
                 raise RuntimeError(
-                    "Unable to resolve a working Gemini model. Tried: " + "; ".join(errors[:6])
+                    f"Gemini request failed before tool-calling ({candidate_model}): {_error_text(e)}"
                 )
-        else:
-            _RESOLVED_GEMINI_MODEL = selected_model
+        if resp is None:
+            raise RuntimeError("Unable to resolve a working Gemini request. Tried: " + "; ".join(errors[:6]))
         requested_calls = _extract_function_calls_from_response(resp)
 
         if not requested_calls:
@@ -744,7 +763,12 @@ def _try_gemini_function_calling(question: str) -> Dict[str, Any]:
             # Gemini is done with tool calls; ask for strict final JSON based on gathered context.
             contents.append(types.Content(role="model", parts=[types.Part.from_text(text=_extract_text_from_response(resp) or "")]))
             contents.append(types.Content(role="user", parts=[types.Part.from_text(text=FINAL_SCHEMA_PROMPT)]))
-            final_resp = client.models.generate_content(model=selected_model, contents=contents, config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION))
+            final_resp = _call_gemini_with_retry(
+                client,
+                selected_model,
+                contents,
+                types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
+            )
             parsed = _parse_json_block(_extract_text_from_response(final_resp))
             if not parsed:
                 # one retry with harder constraint
@@ -754,10 +778,11 @@ def _try_gemini_function_calling(question: str) -> Dict[str, Any]:
                         parts=[types.Part.from_text(text="Return only JSON. No markdown. No prose. Use the exact keys.")],
                     )
                 )
-                retry_resp = client.models.generate_content(
-                    model=selected_model,
-                    contents=contents,
-                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
+                retry_resp = _call_gemini_with_retry(
+                    client,
+                    selected_model,
+                    contents,
+                    types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
                 )
                 parsed = _parse_json_block(_extract_text_from_response(retry_resp))
 
@@ -872,13 +897,13 @@ def ask_agent(question: str) -> Dict[str, Any]:
             fallback_reason="empty_question",
         )
 
-    api_key = _clean(os.getenv("GEMINI_API_KEY"))
+    api_key = _resolve_gemini_api_key()
     if not api_key:
         tool_name, args = _fallback_tool_for_question(q)
         result = _execute_tool(tool_name, args)
         fallback = _build_fallback_answer(q, tool_name, result)
         fallback["tool_calls"] = [_tool_trace_entry(tool_name, args, result)]
-        fallback["fallback_reason"] = "GEMINI_API_KEY is missing or blank"
+        fallback["fallback_reason"] = "Gemini API key is missing (expected GEMINI_API_KEY or GOOGLE_API_KEY)"
         return fallback
 
     try:
