@@ -11,10 +11,10 @@ short_description: Coral-powered sprint intelligence for software teams
 ---
 
 <p align="center">
-  <img src="assets/omnisprint-logo.png" alt="OmniSprint Logo" width="160" />
+  <img width="400" height="200" alt="omnisprint_light_bg_400x200-3" src="https://github.com/user-attachments/assets/326e35f8-c09f-4bc0-91a8-0e7dc86377e4" />
+
 </p>
 
-# OmniSprint
 
 <p align="center"><strong>Coral-powered sprint intelligence for software teams.</strong></p>
 
@@ -32,12 +32,11 @@ OmniSprint connects planning sheets with GitHub issues, pull requests, and CI si
 
 - [Problem](#problem)
 - [Solution](#solution)
-- [Why Coral](#why-coral)
+- [How is Coral being used?](#how-is-coral-being-used)
 - [Architecture](#architecture)
 - [How It Works](#how-it-works)
 - [Features](#features)
 - [Demo Workspace](#demo-workspace)
-- [Screenshots](#screenshots)
 - [Tech Stack](#tech-stack)
 - [Setup](#setup)
 - [Deploying to Hugging Face Spaces](#deploying-to-hugging-face-spaces)
@@ -45,43 +44,33 @@ OmniSprint connects planning sheets with GitHub issues, pull requests, and CI si
 - [API Endpoints](#api-endpoints)
 - [Custom Coral Source Specs](#custom-coral-source-specs)
 - [Coral, Gemini, and Token Efficiency](#coral-gemini-and-token-efficiency)
-- [Hackathon Judging Criteria Alignment](#hackathon-judging-criteria-alignment)
-- [Demo Script](#demo-script)
 - [Roadmap](#roadmap)
 - [Security](#security)
 
 ## Problem
 
-Engineering leads often need to manually cross-reference:
-
-- planning sheets
-- GitHub issues
-- GitHub pull requests
-- CI/check status
-- contributor updates
-
-This workflow is slow and error-prone.
-
-Common failure modes:
-
-- Broad reminders are sent to everyone, including contributors who are already on track.
-- Real blockers are missed because evidence is spread across multiple tools.
-- Risk visibility degrades in volunteer/contributor-driven teams where activity and availability vary.
+OmniSprint is an AI-powered sprint tracking and engineering intelligence platform designed for fast-moving product and engineering teams.
+Most teams already track work across multiple tools: Linear for issues, GitHub for code, Notion for documentation, Google Sheets for planning, and team communication tools for follow-ups. The problem is that sprint health is rarely visible in one place. Project managers, engineering leads, and founders often need to manually check several systems to answer basic questions like:
+- Are we on track to complete the sprint?
+- Which tasks are blocked?
+- Which pull requests are pending review?
+- Who needs a follow-up?
+- Which issues are at risk of slipping?
+- Did a recent commit introduce a regression?
+- Which owner should take action next?
 
 ## Solution
 
-OmniSprint turns that fragmented process into a structured risk workflow:
+OmniSprint solves this by connecting project management, documentation, spreadsheets, and engineering activity into one intelligent sprint cockpit.
 
 - Pull planning and GitHub evidence through Coral.
 - Group semi-structured planning rows into actual projects.
 - Extract and map linked issue/PR references.
 - Score project-level delivery risk.
 - Identify only projects that need attention.
-- Generate targeted Google Chat/email follow-up drafts only for `HIGH`/`CRITICAL` projects.
+- Generate targeted Google chat/Slack/Whatsapp/email follow-up drafts only for `HIGH`/`CRITICAL` projects.
 
-## Why Coral
-
-Coral is the retrieval layer in OmniSprint, not a branding add-on.
+## How is Coral being used?
 
 In this repository:
 
@@ -109,9 +98,7 @@ With Coral, OmniSprint retrieves focused rows and compact evidence first, then p
 
 This approach:
 
-- helps reduce unnecessary prompt context
 - can reduce token load
-- keeps responses more retrieval-grounded
 - avoids dumping entire sheets/repos into Gemini
 
 ## Architecture
@@ -179,17 +166,8 @@ For the demo, OmniSprint is connected to:
 - GitHub issues and pull requests
 - CI/check signals where available
 
-OmniSprint is not Oppia-specific. Oppia is the demo workspace; the architecture is reusable for other software teams using planning sheets plus GitHub.
 
-## Screenshots
 
-![Dashboard](assets/screenshots/dashboard.png)
-![Project Detail](assets/screenshots/project-detail.png)
-![Reminders](assets/screenshots/reminders.png)
-
-If these files are not present yet, add screenshots under `assets/screenshots/` before publishing.
-
-If the logo is not present yet, place it at `assets/omnisprint-logo.png`.
 
 ## Tech Stack
 
@@ -403,11 +381,6 @@ With Coral:
 - It can lower token load and improve response grounding.
 - The agent focuses on reasoning/writing while Coral handles retrieval.
 
-Careful claim:
-
-- OmniSprint helps reduce unnecessary prompt context and can reduce token load.
-- It does not claim fixed percentage savings or guaranteed hallucination elimination.
-
 Example focused retrieval query:
 
 ```sql
@@ -416,55 +389,6 @@ FROM planning.projects
 WHERE lower(coalesce(status, '')) != 'completed';
 ```
 
-## Hackathon Judging Criteria Alignment
-
-### 🏴‍☠️ Potential Impact
-
-OmniSprint reduces manual follow-up overhead and helps leads focus on risky projects instead of broadcasting reminders to everyone.
-
-### ⚓ Creativity & Originality
-
-OmniSprint does more than dashboarding. It converts cross-source risk evidence into targeted follow-up drafts for the right contributors.
-
-### 🗺️ Learning & Growth
-
-The project required hands-on learning across:
-
-- Coral source setup
-- SQL retrieval patterns
-- GitHub source integration
-- semi-structured planning-sheet normalization
-- project-level risk modeling
-
-### ⚔️ Technical Implementation
-
-Implementation combines:
-
-- FastAPI backend
-- React frontend
-- Coral CLI + SQL retrieval
-- project normalizer
-- risk engine
-- reminder generator
-
-### 🎨 Aesthetics & UX
-
-The product provides a professional dashboard with project risk views, owner summaries, detail drill-downs, and reminder actions.
-
-### 🪸 Best Use of Coral
-
-Coral is the operational retrieval layer for planning and GitHub evidence. SQL-based multi-source access keeps the agent layer grounded with compact evidence instead of large prompt stuffing.
-
-## Demo Script
-
-1. Open the dashboard.
-2. Show at-risk project count.
-3. Open a high-risk project detail.
-4. Show planning + linked issue/PR evidence.
-5. Generate Google Chat reminder draft.
-6. Open email draft link.
-7. Show source health in `/api/health`.
-8. Explain Coral retrieval flow and how risk is computed.
 
 ## Roadmap
 
